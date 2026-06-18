@@ -61,8 +61,7 @@ The DE in this repo includes:
 
 Build and push to OCP:
 ```bash
-cd decision-environment/
-bash build.sh
+ansible-playbook decision-environment/build_de.yml
 ```
 
 ## AWS Test Infrastructure

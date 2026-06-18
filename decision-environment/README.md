@@ -21,7 +21,8 @@ container image that contains:
 | `requirements.yml` | Ansible collections to install (`community.aws`, `ansible.eda`, etc.) |
 | `requirements.txt` | Python packages (boto3, aiohttp, etc.) |
 | `bindep.txt` | System packages (git, curl, etc.) |
-| `build.sh` | Automated build + push to OCP ImageStream |
+| `build_de.yml` | Automated build + push to OCP ImageStream (Ansible playbook) |
+| `test_de.yml` | Verifies DE image contents and functionality (Ansible playbook) |
 
 ## Build Methods
 
@@ -55,7 +56,7 @@ export AAP_PASS="<your-aap-password>"
 ansible-playbook decision-environment/build_de.yml
 ```
 
-## What build.sh Does
+## What build_de.yml Does
 
 1. Builds the DE image using `podman build`
 2. Verifies `ansible-rulebook` and `community.aws` are present
@@ -131,7 +132,7 @@ podman run --rm \
 
 ## OCP ImageStream Reference
 
-After running `build.sh`, the image is available in OCP as:
+After running `build_de.yml`, the image is available in OCP as:
 
 ```
 # External reference (from outside cluster)

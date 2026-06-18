@@ -58,25 +58,20 @@ rulebooks/
 
 ## AAP Setup
 
-The setup is done by `setup_all_aap.sh`. Manually:
+The `EDA-Regex-Demo` job template and `eda-regex-demo-activation` are created
+by the full-stack playbook:
 
 ```bash
-AAP_BASE="https://aap-aap.apps-crc.testing"
-AAP_PASS="uCrmAIFPissa1gD1KnYfqJmcI5tw4iIs"
-CTRL="$AAP_BASE/api/controller/v2"
+export AAP_BASE="https://aap-aap.apps-crc.testing"
+export AAP_TOKEN="<gateway-token>"
+ansible-playbook setup_all_aap.yml
+```
 
-# Create job template (reuses existing inventory + project)
-curl -sk -X POST "$CTRL/job_templates/" -u "admin:$AAP_PASS" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "EDA-Regex-Demo",
-    "job_type": "run",
-    "inventory": <INVENTORY_ID>,
-    "project": <PROJECT_ID>,
-    "playbook": "eda_regex_samples/playbooks/process_with_regex.yml",
-    "ask_variables_on_launch": true,
-    "ask_limit_on_launch": true
-  }'
+Or via the configuration-as-code playbook:
+
+```bash
+ansible-playbook aap_config/configure_aap.yml \
+  -e @aap_config/vault.yml --ask-vault-pass
 ```
 
 ---

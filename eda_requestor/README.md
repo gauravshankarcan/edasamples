@@ -69,33 +69,32 @@ automation result is returned to the original caller.
 | `rulebook.yml` | EDA rulebook — receives events, fires job template |
 | `playbooks/handle_with_callback.yml` | Does the work and POSTs result back |
 | `tests/mock_callback_server.py` | Python HTTP server to receive callbacks (testing) |
-| `tests/test_request.sh` | End-to-end test script |
-| `setup_aap.sh` | Create all AAP objects |
+| `tests/test_request.yml` | End-to-end test playbook |
+| `setup_aap.yml` | Create all AAP objects |
 
 ## Testing End-to-End
 
-### Step 1: Start the mock callback server
+### Step 1: Set up AAP objects
 ```bash
-python3 tests/mock_callback_server.py --port 8888
+export AAP_BASE="https://aap-aap.apps-crc.testing"
+export AAP_TOKEN="<gateway-token>"
+ansible-playbook eda_requestor/setup_aap.yml
 ```
 
-### Step 2: Send a request to EDA
+### Step 2: Start the mock callback server
 ```bash
-EDA_URL="http://localhost:5000"    # Your activation URL
+python3 eda_requestor/tests/mock_callback_server.py --port 8888
+```
+
+### Step 3: Send a test request to EDA
+```bash
 MY_IP=$(hostname -I | cut -d' ' -f1)
-
-curl -X POST "$EDA_URL" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "request_id": "test-12345",
-    "callback_url": "http://'"$MY_IP"':8888/callback",
-    "action": "check",
-    "resource": "prod-web-server-01",
-    "requestor": "ops-team@example.com"
-  }'
+ansible-playbook eda_requestor/tests/test_request.yml \
+  -e "eda_url=https://<activation-route>" \
+  -e "callback_url=http://${MY_IP}:8888/callback"
 ```
 
-### Step 3: Watch the mock server terminal
+### Step 4: Watch the mock server terminal
 Within ~30-60 seconds (job queue + playbook run time), the mock server will print:
 ```
 ============================================================

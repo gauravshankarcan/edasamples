@@ -22,9 +22,9 @@ curl POST → EDA Activation (port 5000)
 | `rulebook.yml` | EDA rulebook with webhook source |
 | `playbooks/handle_event.yml` | Playbook triggered by job template |
 | `inventory/hosts.yml` | Static localhost inventory |
-| `setup_aap.sh` | Creates all required AAP objects |
+| `setup_aap.yml` | Creates all required AAP objects |
 
-## Setup (AAP Objects Created by setup_aap.sh)
+## Setup (AAP Objects Created by setup_aap.yml)
 
 ### AAP Controller
 - **Inventory**: `EDA-Sample-Inventory` (localhost)
@@ -41,17 +41,17 @@ curl POST → EDA Activation (port 5000)
 ```bash
 export AAP_BASE="https://aap-aap.apps-crc.testing"
 export AAP_TOKEN="<your-gateway-token>"
-bash setup_aap.sh
+ansible-playbook samples/setup_aap.yml
 ```
 
 ## Test the Webhook
 
 ```bash
 # Get the event stream URL from the activation
-ACTIVATION_URL=$(bash get_webhook_url.sh)
+ansible-playbook samples/get_webhook_url.yml
 
 # Fire a test event
-curl -X POST "$ACTIVATION_URL" \
+curl -X POST "<activation-url-from-above>" \
   -H "Content-Type: application/json" \
   -d '{
     "action": "deploy",

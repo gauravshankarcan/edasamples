@@ -56,7 +56,7 @@ export AAP_BASE="https://aap-aap.apps-crc.testing"
 export AAP_TOKEN="<gateway-token>"
 export AWS_ACCESS_KEY_ID="your-key"
 export AWS_SECRET_ACCESS_KEY="your-secret"
-bash setup_aap.sh
+ansible-playbook eda_param_limit_jobs/setup_aap.yml
 ```
 
 This creates:

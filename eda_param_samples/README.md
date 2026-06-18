@@ -63,7 +63,7 @@ action:
 ```bash
 export AAP_BASE="https://aap-aap.apps-crc.testing"
 export AAP_TOKEN="<gateway-token>"
-bash setup_aap.sh
+ansible-playbook eda_param_samples/setup_aap.yml
 ```
 
 ## Test Examples

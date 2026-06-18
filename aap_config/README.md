@@ -65,9 +65,9 @@ ansible-vault encrypt aap_config/vault.yml
 ### 3. (Once) Build and push the Decision Environment image
 
 ```bash
-cd decision-environment && ./build.sh
+ansible-playbook decision-environment/build_de.yml
 ```
-The `build.sh` script builds the DE with `podman`, pushes it to the OpenShift
+`build_de.yml` builds the DE with `podman`, pushes it to the OpenShift
 internal imagestream `aap/eda-community-de:latest`, and registers it in AAP EDA.
 Once pushed, subsequent `configure_aap.yml` runs just reference the image URL
 without rebuilding.
@@ -136,8 +136,8 @@ The playbook is fully idempotent — running it multiple times produces no
 unintended changes.  The dispatch role uses `state: present` for all objects,
 so existing objects are updated only if their definition changed.
 
-## Converting from manual curl setup
+## Converting from manual setup
 
-If you previously used `setup_all_aap.sh` (raw curl calls), the objects it
-created are identical to those declared here.  Running `configure_aap.yml` will
+If you previously used the individual `setup_aap.yml` playbooks per sample, the objects
+they create are identical to those declared here.  Running `configure_aap.yml` will
 bring any missing objects into existence and leave existing ones unchanged.

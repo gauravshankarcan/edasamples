@@ -369,8 +369,8 @@ my-eda-project/
 │   ├── production.yml
 │   └── staging.yml
 │
-└── tests/                       # Testing scripts
-    ├── test_webhook_deploy.sh   # Curl-based trigger tests
+└── tests/                       # Testing playbooks
+    ├── test_webhook_deploy.yml  # Ansible-based trigger tests
     └── expected_events/
         └── deploy_event.json
 ```
@@ -481,8 +481,8 @@ rules:
 
 ### Integration Testing
 ```bash
-# test_webhook.sh — included in tests/ folder
-WEBHOOK_URL="https://your-eda-server:5000"
+# Using curl to fire a test event — use your activation's OCP route URL
+WEBHOOK_URL="https://your-activation-route.apps-crc.testing"
 CORRELATION_ID=$(uuidgen)
 
 curl -X POST "$WEBHOOK_URL" \
