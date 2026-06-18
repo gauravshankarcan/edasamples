@@ -1,0 +1,159 @@
+---
+# Playbook: EDA Requester-Response Handler
+# Called by: EDA-Requestor-Handler job template
+#
+# This playbook:
+#   1. Receives the request parameters from EDA via extra_vars
+#   2. Performs the requested action
+#   3. POSTs the result back to req_callback_url
+#
+# Extra vars from EDA:
+#   req_action        — provision | check | remediate | error
+#   req_request_id    — correlation UUID from requester
+#   req_callback_url  — URL to POST result to
+#   req_resource      — resource name/identifier
+#   req_parameters    — JSON string of action-specific parameters
+#   req_requestor     — who made the request
+#   req_timeout_secs  — how long the requester is waiting (informational)
+#   req_error_message — pre-set error message (for error action)
+
+- name: "EDA Request Handler with Callback Response"
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: "Record start time"
+      ansible.builtin.set_fact:
+        started_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+    - name: "Log request details"
+      ansible.builtin.debug:
+        msg:
+          - "════════════════════════════════════════════"
+          - "  EDA Request Handler"
+          - "  Request ID:   {{ req_request_id }}"
+          - "  Action:       {{ req_action }}"
+          - "  Resource:     {{ req_resource }}"
+          - "  Requestor:    {{ req_requestor }}"
+          - "  Callback URL: {{ req_callback_url }}"
+          - "  Parameters:   {{ req_parameters }}"
+          - "════════════════════════════════════════════"
+
+    # ── Action: provision ─────────────────────────────────────────────────────
+    - name: "Execute provisioning"
+      block:
+        - name: "Provision resource"
+          ansible.builtin.debug:
+            msg:
+              - "PROVISIONING: {{ req_resource }}"
+              - "Parameters: {{ req_parameters }}"
+              - "(In production: call terraform, Ansible roles, k8s, etc.)"
+
+        - name: "Set provision result"
+          ansible.builtin.set_fact:
+            action_status: "success"
+            action_result:
+              resource: "{{ req_resource }}"
+              provisioned: true
+              resource_id: "prov-{{ req_request_id[:8] }}"
+              endpoint: "https://{{ req_resource }}.example.com"
+            action_message: "Resource {{ req_resource }} provisioned successfully"
+      when: req_action == "provision"
+
+    # ── Action: check ─────────────────────────────────────────────────────────
+    - name: "Execute status check"
+      block:
+        - name: "Check resource status"
+          ansible.builtin.debug:
+            msg: "CHECKING STATUS of: {{ req_resource }}"
+
+        - name: "Set check result"
+          ansible.builtin.set_fact:
+            action_status: "success"
+            action_result:
+              resource: "{{ req_resource }}"
+              status: "healthy"
+              checks:
+                connectivity: "pass"
+                disk_usage: "42%"
+                service_status: "running"
+            action_message: "Resource {{ req_resource }} health check passed"
+      when: req_action == "check"
+
+    # ── Action: remediate ─────────────────────────────────────────────────────
+    - name: "Execute remediation"
+      block:
+        - name: "Remediate resource"
+          ansible.builtin.debug:
+            msg: "REMEDIATING: {{ req_resource }} with params: {{ req_parameters }}"
+
+        - name: "Set remediation result"
+          ansible.builtin.set_fact:
+            action_status: "success"
+            action_result:
+              resource: "{{ req_resource }}"
+              remediated: true
+              actions_taken:
+                - "Restarted service"
+                - "Cleared stale locks"
+                - "Freed disk space"
+            action_message: "Remediation of {{ req_resource }} completed"
+      when: req_action == "remediate"
+
+    # ── Action: error (unknown action) ────────────────────────────────────────
+    - name: "Set error response"
+      ansible.builtin.set_fact:
+        action_status: "failure"
+        action_result:
+          error: "{{ req_error_message }}"
+        action_message: "{{ req_error_message | default('Unknown error') }}"
+      when: req_action == "error"
+
+    # ── POST result back to requester ─────────────────────────────────────────
+    - name: "Send callback response to requester"
+      ansible.builtin.uri:
+        url: "{{ req_callback_url }}"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+          X-EDA-Request-ID: "{{ req_request_id }}"
+          X-EDA-Callback: "true"
+        body_format: json
+        body:
+          request_id: "{{ req_request_id }}"
+          status: "{{ action_status | default('success') }}"
+          result: "{{ action_result | default({}) }}"
+          message: "{{ action_message | default('Completed') }}"
+          action: "{{ req_action }}"
+          resource: "{{ req_resource }}"
+          requestor: "{{ req_requestor }}"
+          started_at: "{{ started_at }}"
+          completed_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+        status_code: [200, 201, 202, 204]
+        validate_certs: false
+        timeout: 30
+      when:
+        - req_callback_url | length > 0
+        - action_status is defined
+      register: callback_result
+      ignore_errors: true
+
+    - name: "Log callback result"
+      ansible.builtin.debug:
+        msg:
+          - "Callback response code: {{ callback_result.status | default('N/A') }}"
+          - "Callback success: {{ callback_result.failed | default(false) | ternary('NO', 'YES') }}"
+      when: req_callback_url | length > 0
+
+    - name: "Warn if callback URL not set"
+      ansible.builtin.debug:
+        msg: "WARNING: No callback_url provided — result not returned to requester"
+      when: req_callback_url | length == 0
+
+    - name: "Final summary"
+      ansible.builtin.debug:
+        msg:
+          - "Request {{ req_request_id }} completed"
+          - "Status: {{ action_status | default('unknown') }}"
+          - "Message: {{ action_message | default('') }}"
+          - "Callback sent: {{ 'YES' if req_callback_url | length > 0 else 'NO — no callback_url' }}"

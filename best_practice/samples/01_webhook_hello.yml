@@ -1,0 +1,28 @@
+---
+# SAMPLE 01: Minimal webhook rulebook
+# Purpose: Hello-world for EDA. Shows the simplest possible working rulebook.
+# How to test:
+#   curl -X POST http://localhost:5000 -H "Content-Type: application/json" \
+#        -d '{"message": "hello EDA"}'
+
+- name: "Hello EDA - Webhook Demo"
+  hosts: localhost
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: "Print any incoming event"
+      condition: event.payload is defined
+      action:
+        debug:
+          msg: >-
+            Received event: {{ event.payload }}
+            From: {{ event.meta.headers.get('host', 'unknown') }}
+
+    - name: "Greet named senders"
+      condition: event.payload.sender is defined
+      action:
+        debug:
+          msg: "Hello, {{ event.payload.sender }}! Your message: {{ event.payload.message | default('(none)') }}"

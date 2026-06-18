@@ -1,0 +1,72 @@
+---
+# Dynamic AWS EC2 Inventory for EDA limit demo
+# File must end in .aws_ec2.yml or .aws_ec2.yaml
+#
+# This creates inventory groups from EC2 tags automatically:
+#   tag_Group_webservers   → all EC2s with tag Group=webservers
+#   tag_Environment_staging → all EC2s with tag Environment=staging
+#   tag_Owner_eda-samples   → all EC2s with tag Owner=eda-samples
+#
+# Use these group names in EDA rulebook 'limit' parameter.
+#
+# Usage with ansible-playbook:
+#   ansible-playbook -i aws/inventory.aws_ec2.yml playbooks/limited_action.yml \
+#     --limit webservers
+#
+# Usage in AAP:
+#   Add this file as a source in an AAP Inventory with type "Amazon EC2"
+
+plugin: amazon.aws.aws_ec2
+
+# AWS region(s) to query
+regions:
+  - us-east-1
+
+# Filter to only EDA test instances (by tag)
+filters:
+  tag:Owner: eda-samples
+  instance-state-name: running
+
+# How to name hosts in the inventory
+# Options: private_ip_address, public_ip_address, dns-name, tag:Name
+hostnames:
+  - tag:Name         # Use the Name tag (e.g., "eda-test-web01")
+  - private_ip_address  # Fallback to private IP if no Name tag
+
+# Create groups from EC2 tags and attributes
+keyed_groups:
+  # Groups based on tags (most useful for EDA limit targeting)
+  - key: tags.Group
+    prefix: ""        # group name = tag value directly (e.g., "webservers")
+    separator: ""
+
+  - key: tags.Environment
+    prefix: "env_"    # group name = env_staging, env_production, etc.
+    separator: ""
+
+  - key: tags.Role
+    prefix: "role_"
+    separator: ""
+
+  # Standard keyed groups
+  - key: instance_type
+    prefix: "type_"
+  - key: placement.region
+    prefix: "region_"
+
+# Static groups composed of multiple keyed groups
+groups:
+  all_web: "'webservers' in (tags.Group | default(''))"
+  all_db: "'databases' in (tags.Group | default(''))"
+  eda_test_all: "'eda-samples' == tags.Owner | default('')"
+
+# Variables applied to all hosts
+compose:
+  ansible_host: public_ip_address | default(private_ip_address)
+  instance_id: instance_id
+  instance_type: instance_type
+  instance_region: placement.region
+  # Map tag values to vars
+  host_group: tags.Group | default('ungrouped')
+  host_environment: tags.Environment | default('unknown')
+  host_role: tags.Role | default('unknown')

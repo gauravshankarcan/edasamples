@@ -1,0 +1,451 @@
+---
+# configure_aap.yml
+# ──────────────────────────────────────────────────────────────────────────────
+# Idempotent playbook to configure the complete AAP environment for EDA samples.
+# Uses the infra.aap_configuration collection dispatch role, which handles
+# dependency ordering automatically:
+#
+#   Gateway → Hub → Controller → EDA
+#
+# USAGE
+# ──────
+# 1. Install collections:
+#      ansible-galaxy collection install -r aap_config/requirements.yml
+#
+# 2. Create vault file (copy example, fill real secrets, then encrypt):
+#      cp aap_config/vault-example.yml aap_config/vault.yml
+#      ansible-vault encrypt aap_config/vault.yml
+#
+# 3. Run the full configuration:
+#      ansible-playbook aap_config/configure_aap.yml \
+#        -e @aap_config/vault.yml --ask-vault-pass
+#
+# 4. Configure only EDA (skip Controller):
+#      ansible-playbook aap_config/configure_aap.yml \
+#        -e @aap_config/vault.yml --ask-vault-pass \
+#        --tags eda
+#
+# 5. Configure only Controller job templates:
+#      ansible-playbook aap_config/configure_aap.yml \
+#        -e @aap_config/vault.yml --ask-vault-pass \
+#        --tags job_templates
+#
+# WHAT THIS CONFIGURES
+# ─────────────────────
+# AAP Controller:
+#   • Organization: Default
+#   • Credential:   EDA-AWS-Credential (Amazon Web Services)
+#   • Inventory:    EDA-Sample-Inventory (static localhost)
+#   • Inventory:    EDA-AWS-Dynamic-Inventory (EC2 dynamic)
+#   • Host:         localhost in EDA-Sample-Inventory
+#   • Inv Source:   EDA-AWS-EC2-Source (EC2, tag Owner=eda-samples)
+#   • Project:      EDA-Samples-Project ({{ git_repo_url }})
+#   • Job Templates (5): EDA-Sample-Webhook-Handler, EDA-Param-Deploy-Service,
+#                        EDA-Limit-OS-Patching, EDA-Requestor-Handler, EDA-Regex-Demo
+#
+# EDA Controller:
+#   • Decision Environment: EDA-Community-DE (OCP imagestream)
+#   • Credential:           EDA-AAP-Controller-Credential (AAP Controller token)
+#   • Project:              EDA-Samples (same GitHub repo)
+#   • Activations (5):      sample-webhook, eda-param-samples, eda-limit-jobs,
+#                           eda-requestor, eda-regex-demo
+#
+# PREREQUISITES
+# ──────────────
+# Before running, ensure:
+#   1. The EDA-Community-DE image is built and pushed to the OCP imagestream:
+#        cd decision-environment && ./build.sh
+#   2. OCP Routes exist for each activation's k8s_service_name:
+#        oc apply -f aap_config/ocp_routes.yml -n aap
+#      (The routes are created automatically by configure_aap.yml step 2 below)
+
+- name: "Step 1 — Configure AAP Controller and EDA via infra.aap_configuration"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  environment:
+    # AAP 2.5+ uses /api/controller/ prefix instead of /api/.
+    # awx.awx 24.x defaults to /api/ but supports this env override.
+    CONTROLLER_OPTIONAL_API_URLPATTERN_PREFIX: "/api/controller/"
+
+  pre_tasks:
+    - name: "Load vault credentials"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vault.yml"
+      no_log: true
+      tags: always
+
+    - name: "Load auth variables"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/auth.yml"
+      tags: always
+
+    - name: "Load Controller configuration"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/controller_config.yml"
+      tags:
+        - always
+        - controller
+
+    - name: "Load EDA configuration"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/eda_config.yml"
+      tags:
+        - always
+        - eda
+
+    - name: "Verify AAP is reachable"
+      ansible.builtin.uri:
+        url: "{{ aap_hostname }}/api/gateway/v1/"
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: [200, 401]
+      register: aap_ping
+      tags: always
+
+    - name: "Show AAP gateway version"
+      ansible.builtin.debug:
+        msg: "AAP gateway reachable at {{ aap_hostname }}"
+      tags: always
+
+    # In AAP 2.5+, the /api/controller/v2/tokens/ endpoint does not exist.
+    # Tokens live on the gateway (/api/gateway/v1/tokens/).
+    # awx.awx 24.x tries to POST to /api/controller/v2/tokens/ when given
+    # username+password, so we pre-create a short-lived gateway token and
+    # pass it as aap_token — bypassing the module's own token creation.
+    - name: "Create short-lived gateway token for infra.aap_configuration roles"
+      ansible.builtin.uri:
+        url: "{{ aap_hostname }}/api/gateway/v1/tokens/"
+        method: POST
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        body_format: json
+        body:
+          description: "infra.aap_configuration automation (auto-deleted)"
+          scope: write
+        status_code: [200, 201]
+      register: gateway_token_result
+      no_log: true
+      tags: always
+
+    - name: "Store token for Controller/EDA modules"
+      ansible.builtin.set_fact:
+        aap_token: "{{ gateway_token_result.json.token }}"
+        # Unset username/password so awx.awx uses the token instead of trying
+        # to call /api/controller/v2/tokens/ (which doesn't exist in AAP 2.5+)
+        aap_username: ""
+        aap_password: ""
+      no_log: true
+      tags: always
+
+  tasks:
+    # Create inventories BEFORE the dispatch role so job templates can reference them.
+    # Using awx.awx directly because infra.aap_configuration 3.3.0 has a
+    # regex_replace filter bug that corrupts the 'variables' argument (str vs dict).
+    - name: "Create EDA-Sample-Inventory (static localhost)"
+      awx.awx.inventory:
+        name: EDA-Sample-Inventory
+        description: "Static localhost inventory for EDA webhook-triggered playbooks"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      environment:
+        CONTROLLER_OPTIONAL_API_URLPATTERN_PREFIX: "/api/controller/"
+      tags:
+        - inventories
+
+    - name: "Create EDA-AWS-Dynamic-Inventory"
+      awx.awx.inventory:
+        name: EDA-AWS-Dynamic-Inventory
+        description: "AWS EC2 dynamic inventory for eda_param_limit_jobs — targets tagged instances"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      environment:
+        CONTROLLER_OPTIONAL_API_URLPATTERN_PREFIX: "/api/controller/"
+      tags:
+        - inventories
+
+    # Disable any running activations BEFORE the dispatch role so that
+    # ansible.eda can update their configuration without the EDA API error:
+    # "Activation is not in disabled mode and in stopped status".
+    # The POST /activations/{id}/disable/ endpoint is the correct action.
+    # The dispatch role will re-enable them by setting enabled: true.
+    - name: "Fetch current EDA activations"
+      ansible.builtin.uri:
+        url: "{{ aap_hostname }}/api/eda/v1/activations/?page_size=50"
+        user: "admin"
+        password: "{{ vault_aap_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: [200]
+      register: _current_activations
+      ignore_errors: true
+      tags:
+        - eda
+
+    - name: "Disable running activations (POST /disable/)"
+      ansible.builtin.uri:
+        url: "{{ aap_hostname }}/api/eda/v1/activations/{{ item.id }}/disable/"
+        method: POST
+        user: "admin"
+        password: "{{ vault_aap_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: [200, 204]
+      loop: "{{ _current_activations.json.results | default([]) }}"
+      when: item.status in ['running', 'starting', 'stopping']
+      ignore_errors: true
+      tags:
+        - eda
+
+    - name: "Wait for activations to reach stopped state"
+      ansible.builtin.pause:
+        seconds: 5
+      when: _current_activations.json.results | default([]) | selectattr('status', 'in', ['running', 'starting', 'stopping']) | list | length > 0
+      tags:
+        - eda
+
+    - name: "Apply full AAP configuration (Controller + EDA)"
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.dispatch
+      vars:
+        # Override the full roles list to use only what we need.
+        #
+        # WHY: The default dispatcher includes gateway_organizations (uses
+        # ansible.platform — Automation Hub only) and all hub roles.
+        # On systems using Galaxy/awx.awx, we define only the Controller
+        # and EDA roles that are satisfied by ansible.controller (awx.awx)
+        # and ansible.eda.
+        #
+        # NOTE: aap_configuration_dispatcher_exclude_roles is NOT used here
+        # because gateway_organizations appears twice in the default list
+        # (once in gateway roles, once in controller roles). Overriding
+        # aap_configuration_dispatcher_roles is cleaner.
+        aap_configuration_dispatcher_roles:
+          # ── Controller ────────────────────────────────────────────────────
+          - role: controller_credentials
+            var: controller_credentials
+            tags: credentials
+          # NOTE: controller_inventories, controller_hosts, and
+          # controller_inventory_sources are handled BELOW this role call
+          # using direct awx.awx module tasks.
+          # Reason: infra.aap_configuration 3.3.0 passes 'variables' and
+          # 'source_vars' through a Jinja2 regex_replace filter (→ string),
+          # but awx.awx 24.x changed these parameters to require dicts.
+          # The fix is tracked upstream; for now use awx.awx modules directly.
+          - role: controller_projects
+            var: controller_projects
+            tags: projects
+          - role: controller_job_templates
+            var: controller_templates
+            tags: job_templates
+          # ── EDA ──────────────────────────────────────────────────────────
+          - role: eda_credentials
+            var: eda_credentials
+            tags: credential
+          - role: eda_decision_environments
+            var: eda_decision_environments
+            tags: decision_environment
+          - role: eda_projects
+            var: eda_projects
+            tags: project
+          - role: eda_rulebook_activations
+            var: eda_rulebook_activations
+            tags: rulebook_activation
+
+# ── Step 1b: Direct awx.awx tasks for objects where infra.aap_configuration ──
+# has a type mismatch with awx.awx 24.x (variables/source_vars expect dict).
+#
+# This also demonstrates that you can mix the high-level dispatch role with
+# direct module calls when you need finer control.
+
+- name: "Step 1b — Configure hosts and inventory sources directly (awx.awx 24.x)"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  environment:
+    CONTROLLER_OPTIONAL_API_URLPATTERN_PREFIX: "/api/controller/"
+
+  pre_tasks:
+    - name: "Load vault credentials"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vault.yml"
+      no_log: true
+      tags: always
+
+    - name: "Load auth variables"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/auth.yml"
+      tags: always
+
+    - name: "Load Controller configuration"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/controller_config.yml"
+      tags: always
+
+    # IMPORTANT: Step 1's set_fact(aap_password: "") persists into this play
+    # because Ansible set_fact is host-scoped across the full playbook.
+    # Use vault_aap_password directly (extra-var, highest precedence).
+    - name: "Create gateway token (Step 1b)"
+      ansible.builtin.uri:
+        url: "{{ aap_hostname }}/api/gateway/v1/tokens/"
+        method: POST
+        user: "admin"
+        password: "{{ vault_aap_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        body_format: json
+        body:
+          description: "Step 1b token"
+          scope: write
+        status_code: [200, 201]
+      register: _token
+      no_log: true
+      tags: always
+
+    - name: "Store token (Step 1b)"
+      ansible.builtin.set_fact:
+        aap_token: "{{ _token.json.token }}"
+      no_log: true
+      tags: always
+
+  tasks:
+    - name: "Create EDA-Sample-Inventory (static localhost)"
+      awx.awx.inventory:
+        name: EDA-Sample-Inventory
+        description: "Static localhost inventory for EDA webhook-triggered playbooks"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      tags:
+        - inventories
+
+    - name: "Create EDA-AWS-Dynamic-Inventory (EC2 dynamic)"
+      awx.awx.inventory:
+        name: EDA-AWS-Dynamic-Inventory
+        description: "AWS EC2 dynamic inventory for eda_param_limit_jobs — targets tagged instances"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      tags:
+        - inventories
+
+    - name: "Configure localhost host in EDA-Sample-Inventory"
+      awx.awx.host:
+        name: localhost
+        inventory: EDA-Sample-Inventory
+        state: present
+        variables:
+          ansible_connection: local
+          ansible_python_interpreter: "{{ '{{' }} ansible_playbook_python {{ '}}' }}"
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      tags:
+        - inventories
+        - hosts
+
+    - name: "Configure AWS EC2 inventory source"
+      awx.awx.inventory_source:
+        name: EDA-AWS-EC2-Source
+        description: "AWS EC2 dynamic inventory — discovers instances tagged Owner=eda-samples"
+        inventory: EDA-AWS-Dynamic-Inventory
+        source: ec2
+        credential: EDA-AWS-Credential
+        overwrite: true
+        update_on_launch: true
+        state: present
+        source_vars:
+          regions:
+            - us-east-1
+          filters:
+            "tag:Owner": "eda-samples"
+          keyed_groups:
+            - key: "tags.Group"
+              prefix: ""
+              separator: ""
+            - key: "tags.Environment"
+              prefix: "env_"
+            - key: "tags.Role"
+              prefix: "role_"
+          hostnames:
+            - "tag:Name"
+            - "private-ip-address"
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      tags:
+        - inventories
+        - inventory_sources
+
+# ── Step 2: Create OCP Routes for EDA webhook services ───────────────────────
+# The infra.aap_configuration collection configures EDA but does not know about
+# the OpenShift Route objects needed to expose each activation's ClusterIP service
+# externally.  This play creates/updates them idempotently.
+
+- name: "Step 2 — Create OpenShift Routes for EDA activation webhooks"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    kubeconfig_path: "{{ lookup('env', 'KUBECONFIG') | default('/tmp/kubeconfig-eda-session', true) }}"
+    eda_namespace: "aap"
+    eda_activations:
+      - sample-webhook-activation
+      - eda-param-samples-activation
+      - eda-limit-jobs-activation
+      - eda-requestor-activation
+      - eda-regex-demo-activation
+
+  pre_tasks:
+    - name: "Load vault credentials"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vault.yml"
+      no_log: true
+      tags: always
+
+  tasks:
+    - name: "Create OCP Route for each activation"
+      ansible.builtin.shell: |
+        export KUBECONFIG="{{ kubeconfig_path }}"
+        oc apply -f - -n {{ eda_namespace }} <<'YAML'
+        apiVersion: route.openshift.io/v1
+        kind: Route
+        metadata:
+          name: {{ item }}
+        spec:
+          host: {{ item }}.apps-crc.testing
+          to:
+            kind: Service
+            name: {{ item }}
+          port:
+            targetPort: 5000
+          tls:
+            termination: edge
+            insecureEdgeTerminationPolicy: Redirect
+        YAML
+      loop: "{{ eda_activations }}"
+      register: route_results
+      changed_when: "'created' in route_results.stdout or 'configured' in route_results.stdout"
+      tags:
+        - routes
+        - eda
+
+    - name: "Show route endpoints"
+      ansible.builtin.debug:
+        msg: "Webhook URL: https://{{ item }}.apps-crc.testing"
+      loop: "{{ eda_activations }}"
+      tags:
+        - routes
+        - eda

@@ -1,0 +1,56 @@
+---
+# Teardown: Remove all EDA test EC2 instances
+# Usage: ansible-playbook aws/teardown_instances.yml -e aws_region=us-east-1
+
+- name: "Terminate EDA test EC2 instances"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    aws_region: "{{ aws_region | default('us-east-1') }}"
+    owner_tag: "eda-samples"
+
+  tasks:
+    - name: "Find all EDA test instances"
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Owner": "{{ owner_tag }}"
+          instance-state-name: ["pending", "running", "stopped"]
+      register: instances_info
+
+    - name: "Show instances to be terminated"
+      ansible.builtin.debug:
+        msg: "Will terminate: {{ item.tags.Name | default(item.instance_id) }} ({{ item.instance_id }})"
+      loop: "{{ instances_info.instances }}"
+
+    - name: "Confirm termination"
+      ansible.builtin.pause:
+        prompt: "Press ENTER to terminate {{ instances_info.instances | length }} instances, Ctrl+C to cancel"
+      when: instances_info.instances | length > 0
+
+    - name: "Terminate instances"
+      amazon.aws.ec2_instance:
+        instance_ids: "{{ instances_info.instances | map(attribute='instance_id') | list }}"
+        region: "{{ aws_region }}"
+        state: terminated
+      when: instances_info.instances | length > 0
+
+    - name: "Remove security group"
+      amazon.aws.ec2_security_group:
+        name: "eda-test-sg"
+        region: "{{ aws_region }}"
+        state: absent
+      ignore_errors: true
+
+    - name: "Remove key pair"
+      amazon.aws.ec2_key:
+        name: "eda-test-key"
+        region: "{{ aws_region }}"
+        state: absent
+      ignore_errors: true
+
+    - name: "Cleanup summary"
+      ansible.builtin.debug:
+        msg: "Terminated {{ instances_info.instances | length }} EDA test instances in {{ aws_region }}"

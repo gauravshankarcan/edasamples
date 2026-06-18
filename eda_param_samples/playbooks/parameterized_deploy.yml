@@ -1,0 +1,107 @@
+---
+# Playbook: Parameterized Service Action
+# Called by: EDA-Param-Deploy-Service job template
+#
+# Extra vars passed from EDA rulebook:
+#   param_action      — deploy | rollback | restart | scale
+#   param_service     — service name
+#   param_environment — dev | staging | production
+#   param_version     — semver string (optional for restart)
+#   param_replicas    — integer (for scale only)
+#   param_requestor   — email/username
+#   param_ticket_id   — ticket reference
+#   eda_full_payload  — raw event payload as JSON
+#   eda_event_time    — when the event was received
+
+- name: "EDA Parameterized Service Action"
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: "Display received parameters"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════"
+          - "  EDA Parameterized Action"
+          - "═══════════════════════════════════════"
+          - "  Action:      {{ param_action }}"
+          - "  Service:     {{ param_service }}"
+          - "  Environment: {{ param_environment }}"
+          - "  Version:     {{ param_version }}"
+          - "  Requestor:   {{ param_requestor }}"
+          - "  Ticket:      {{ param_ticket_id }}"
+          - "  Replicas:    {{ param_replicas }}"
+          - "═══════════════════════════════════════"
+
+    - name: "Validate action parameter"
+      ansible.builtin.assert:
+        that:
+          - param_action in ['deploy', 'rollback', 'restart', 'scale']
+        fail_msg: "Invalid action '{{ param_action }}'. Valid: deploy, rollback, restart, scale"
+        success_msg: "Action '{{ param_action }}' is valid"
+
+    - name: "Validate version is present for deploy/rollback"
+      ansible.builtin.assert:
+        that:
+          - param_version | length > 0
+        fail_msg: "Version is required for action '{{ param_action }}'"
+        success_msg: "Version '{{ param_version }}' provided"
+      when: param_action in ['deploy', 'rollback']
+
+    # ── Action-specific tasks ────────────────────────────────────────────────
+
+    - name: "Execute: Deploy service"
+      ansible.builtin.debug:
+        msg:
+          - "DEPLOYING {{ param_service }} version {{ param_version }}"
+          - "Target environment: {{ param_environment }}"
+          - "Requested by: {{ param_requestor }}"
+          - "Ticket: {{ param_ticket_id }}"
+          - "(In production: call deployment API or run k8s/helm tasks here)"
+      when: param_action == "deploy"
+
+    - name: "Execute: Rollback service"
+      ansible.builtin.debug:
+        msg:
+          - "ROLLING BACK {{ param_service }} to version {{ param_version }}"
+          - "Target environment: {{ param_environment }}"
+          - "Requested by: {{ param_requestor }}"
+          - "(In production: rollback to previous helm release or image tag)"
+      when: param_action == "rollback"
+
+    - name: "Execute: Restart service"
+      ansible.builtin.debug:
+        msg:
+          - "RESTARTING {{ param_service }} in {{ param_environment }}"
+          - "Requested by: {{ param_requestor }}"
+          - "(In production: kubectl rollout restart deployment/{{ param_service }})"
+      when: param_action == "restart"
+
+    - name: "Execute: Scale service"
+      ansible.builtin.debug:
+        msg:
+          - "SCALING {{ param_service }} to {{ param_replicas }} replicas"
+          - "Target environment: {{ param_environment }}"
+          - "Requested by: {{ param_requestor }}"
+          - "(In production: kubectl scale deployment/{{ param_service }} --replicas={{ param_replicas }})"
+      when: param_action == "scale"
+
+    - name: "Write audit record"
+      ansible.builtin.copy:
+        content: |
+          {
+            "timestamp": "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}",
+            "action": "{{ param_action }}",
+            "service": "{{ param_service }}",
+            "environment": "{{ param_environment }}",
+            "version": "{{ param_version }}",
+            "requestor": "{{ param_requestor }}",
+            "ticket_id": "{{ param_ticket_id }}",
+            "status": "completed"
+          }
+        dest: "/tmp/eda_audit_{{ param_service }}_{{ param_action }}_{{ lookup('pipe', 'date +%s') }}.json"
+      delegate_to: localhost
+
+    - name: "Action completed successfully"
+      ansible.builtin.debug:
+        msg: "✓ {{ param_action | upper }} of {{ param_service }} in {{ param_environment }} completed successfully"

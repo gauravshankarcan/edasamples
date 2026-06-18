@@ -1,0 +1,117 @@
+---
+# ── EDA Controller Configuration ─────────────────────────────────────────────
+# Consumed by infra.aap_configuration.dispatch (eda roles section).
+
+# ── Decision Environments ─────────────────────────────────────────────────────
+# The EDA-Community-DE image is built with:
+#   podman build -t eda-community-de decision-environment/
+# and pushed to the OpenShift internal registry imagestream.
+# See decision-environment/build.sh for the full build + push procedure.
+eda_decision_environments:
+  - name: EDA-Community-DE
+    description: "Custom DE with community.aws 11.0.0 and ansible.eda 2.10.0"
+    image_url: "image-registry.openshift-image-registry.svc:5000/aap/eda-community-de:latest"
+    organization: Default
+    pull_policy: always
+
+# ── EDA Credentials ───────────────────────────────────────────────────────────
+# This credential lets EDA activations call run_job_template on AAP Controller.
+eda_credentials:
+  - name: EDA-AAP-Controller-Credential
+    description: "AAP Controller connection used by all rulebook activations"
+    organization: Default
+    credential_type: "Red Hat Ansible Automation Platform"
+    inputs:
+      host: "{{ aap_hostname }}/api/controller/"
+      # Use vault variables directly so the actual password is always set here.
+      # aap_username/aap_password are cleared in configure_aap.yml pre_tasks to
+      # prevent awx.awx from calling the non-existent /api/controller/v2/tokens/
+      # endpoint. The EDA credential needs the real values.
+      username: "admin"
+      password: "{{ vault_aap_password }}"
+      verify_ssl: false
+
+# ── EDA Projects ─────────────────────────────────────────────────────────────
+# AAP EDA requires rulebooks in a top-level rulebooks/ directory.
+# All activatable rulebooks live in edasamples/rulebooks/.
+eda_projects:
+  - name: EDA-Samples
+    description: "EDA samples repository — all rulebooks in rulebooks/ directory"
+    url: "{{ git_repo_url }}"
+    scm_type: git
+    scm_branch: main
+    organization: Default
+    verify_ssl: false
+
+# ── Rulebook Activations ─────────────────────────────────────────────────────
+# Each activation maps one rulebook to one webhook service.
+# k8s_service_name sets the Kubernetes Service name, which the OCP Route targets.
+#
+# PREREQUISITE: Create OCP Routes before or after running this playbook:
+#   oc apply -f aap_config/ocp_routes.yml -n aap
+eda_rulebook_activations:
+
+  - name: sample-webhook-activation
+    description: "Basic webhook → EDA-Sample-Webhook-Handler"
+    project: EDA-Samples
+    rulebook: samples-webhook.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: sample-webhook-activation
+    log_level: error
+
+  - name: eda-param-samples-activation
+    description: "Parameterized webhook → EDA-Param-Deploy-Service"
+    project: EDA-Samples
+    rulebook: eda-param-deploy.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-param-samples-activation
+    log_level: error
+
+  - name: eda-limit-jobs-activation
+    description: "Webhook with job limit → EDA-Limit-OS-Patching"
+    project: EDA-Samples
+    rulebook: eda-limit-jobs.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-limit-jobs-activation
+    log_level: error
+
+  - name: eda-requestor-activation
+    description: "Requestor-response pattern → EDA-Requestor-Handler"
+    project: EDA-Samples
+    rulebook: eda-requestor.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-requestor-activation
+    log_level: error
+
+  - name: eda-regex-demo-activation
+    description: "CI/CD image tag regex router → EDA-Regex-Demo"
+    project: EDA-Samples
+    rulebook: eda-regex-demo.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-regex-demo-activation
+    log_level: error

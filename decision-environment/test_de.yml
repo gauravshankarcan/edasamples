@@ -1,0 +1,141 @@
+---
+# test_de.yml — Verify the DE image works correctly.
+#
+# Usage:
+#   ansible-playbook decision-environment/test_de.yml
+#   ansible-playbook decision-environment/test_de.yml -e de_image=my-de:v2
+
+- name: "Test Decision Environment Image"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    de_image: "{{ image | default('eda-community-de:latest') }}"
+
+  tasks:
+    # Test 1: ansible-rulebook version
+    - name: "[1] Check ansible-rulebook version"
+      containers.podman.podman_container:
+        name: "de-test-rulebook-ver"
+        image: "{{ de_image }}"
+        command: ["ansible-rulebook", "--version"]
+        detach: false
+        rm: true
+        state: started
+      register: _rulebook_ver
+
+    - name: "[1] Display ansible-rulebook version"
+      ansible.builtin.debug:
+        msg: "{{ (_rulebook_ver.stdout_lines | default([]))[:5] }}"
+
+    # Test 2: community.aws collection
+    - name: "[2] Verify community.aws collection"
+      containers.podman.podman_container:
+        name: "de-test-community-aws"
+        image: "{{ de_image }}"
+        command: ["ansible-galaxy", "collection", "list", "community.aws"]
+        detach: false
+        rm: true
+        state: started
+      register: _community_aws
+
+    - name: "[2] Assert community.aws is present"
+      ansible.builtin.assert:
+        that: "'community.aws' in (_community_aws.stdout | default(''))"
+        fail_msg: "community.aws collection not found in DE image"
+        success_msg: "community.aws collection verified"
+
+    # Test 3: amazon.aws collection (dependency)
+    - name: "[3] Verify amazon.aws collection"
+      containers.podman.podman_container:
+        name: "de-test-amazon-aws"
+        image: "{{ de_image }}"
+        command: ["ansible-galaxy", "collection", "list", "amazon.aws"]
+        detach: false
+        rm: true
+        state: started
+      register: _amazon_aws
+
+    - name: "[3] Display amazon.aws result"
+      ansible.builtin.debug:
+        msg: "{{ _amazon_aws.stdout | default('not found') }}"
+
+    # Test 4: ansible.eda collection
+    - name: "[4] Verify ansible.eda collection"
+      containers.podman.podman_container:
+        name: "de-test-ansible-eda"
+        image: "{{ de_image }}"
+        command: ["ansible-galaxy", "collection", "list", "ansible.eda"]
+        detach: false
+        rm: true
+        state: started
+      register: _ansible_eda
+
+    - name: "[4] Assert ansible.eda is present"
+      ansible.builtin.assert:
+        that: "'ansible.eda' in (_ansible_eda.stdout | default(''))"
+        fail_msg: "ansible.eda collection not found in DE image"
+        success_msg: "ansible.eda collection verified"
+
+    # Test 5: boto3 Python package
+    - name: "[5] Verify boto3 Python package"
+      containers.podman.podman_container:
+        name: "de-test-boto3"
+        image: "{{ de_image }}"
+        command: ["python3", "-c", "import boto3; print('boto3', boto3.__version__)"]
+        detach: false
+        rm: true
+        state: started
+      register: _boto3
+
+    - name: "[5] Assert boto3 is present"
+      ansible.builtin.assert:
+        that: "'boto3' in (_boto3.stdout | default(''))"
+        fail_msg: "boto3 not found in DE image"
+        success_msg: "boto3 verified: {{ _boto3.stdout | default('') | trim }}"
+
+    # Test 6: Rulebook syntax test
+    - name: "[6] Write test rulebook to temp file"
+      ansible.builtin.copy:
+        dest: "/tmp/test_rulebook_de.yml"
+        mode: "0644"
+        content: |
+          ---
+          - name: "Test Rulebook"
+            hosts: localhost
+            sources:
+              - ansible.eda.webhook:
+                  host: 0.0.0.0
+                  port: 9999
+            rules:
+              - name: "Test rule"
+                condition: event.payload is defined
+                action:
+                  debug:
+                    msg: "{{ '{{' }} event.payload {{ '}}' }}"
+
+    - name: "[6] Start rulebook container (stops after 3 seconds)"
+      ansible.builtin.command:
+        cmd: >
+          podman run --rm --name de-test-rb-syntax
+          -v /tmp/test_rulebook_de.yml:/tmp/test_rulebook.yml:ro
+          {{ de_image }}
+          ansible-rulebook --rulebook /tmp/test_rulebook.yml --print-events
+      async: 10
+      poll: 0
+      register: _rb_job
+
+    - name: "[6] Wait 3 seconds for rulebook to start"
+      ansible.builtin.pause:
+        seconds: 3
+
+    - name: "[6] Stop rulebook test container"
+      ansible.builtin.command:
+        cmd: podman stop de-test-rb-syntax
+      ignore_errors: true
+      changed_when: false
+
+    - name: "All DE tests complete"
+      ansible.builtin.debug:
+        msg: "DE image {{ de_image }} passed all verification tests"

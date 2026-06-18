@@ -1,0 +1,108 @@
+---
+# Playbook: EDA Regex Demo — Image Tag Processor
+# Called by: EDA-Regex-Demo job template
+#
+# Extra vars from EDA rulebook (routing metadata — no regex needed in EDA):
+#   image_tag      — raw tag string, e.g. "hotfix/v2.4.9"
+#   target_env     — production | staging | dev
+#   priority       — high | normal | low
+#   deploy_reason  — stable-release | release-candidate | hotfix | feature | prerelease-beta
+#   repo           — image repo path
+#   pushed_by      — who triggered the push
+#
+# This playbook uses | regex_replace() (Ansible Jinja2 filter) to extract
+# structured data from the raw image_tag string.  regex_replace is NOT
+# available in ansible-rulebook's Jinja2 env — it belongs here in the playbook.
+
+- name: "EDA Regex Demo: Process Image Tag"
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: "Extract structured data with regex_replace"
+      ansible.builtin.set_fact:
+        # Strip prefixes: hotfix/v2.4.9 → 2.4.9 | v2.5.0-rc.1 → 2.5.0-rc.1
+        clean_version: "{{ image_tag | regex_replace('^(hotfix/)?v', '') }}"
+
+        # Extract major.minor: v2.5.0 → 2.5 | hotfix/v2.4.9 → 2.4
+        major_minor: "{{ image_tag | regex_replace('^(hotfix/)?v([0-9]+[.][0-9]+)[.].*', '\\2') }}"
+
+        # Extract only major: v2.5.0 → 2
+        major: "{{ image_tag | regex_replace('^(hotfix/)?v([0-9]+)[.].*', '\\2') }}"
+
+        # Extract base version (strip pre-release suffix): v2.5.0-rc.1 → 2.5.0
+        base_version: "{{ image_tag | regex_replace('^(hotfix/)?v([0-9]+[.][0-9]+[.][0-9]+).*', '\\2') }}"
+
+        # Sanitize for k8s label: hotfix/v2.4.9 → hotfix-v2.4.9 (no slashes)
+        k8s_safe_tag: "{{ image_tag | regex_replace('[^a-zA-Z0-9._-]', '-') | lower }}"
+
+        # Extract feature branch name: feature/add-oauth → add-oauth
+        branch_name: "{{ image_tag | regex_replace('^feature/', '') if deploy_reason == 'feature' else '' }}"
+
+        # Slugify branch for k8s namespace: feature/Add OAuth! → add-oauth-
+        branch_slug: "{{ (image_tag | regex_replace('^feature/', '') | regex_replace('[^a-z0-9]', '-') | lower) if deploy_reason == 'feature' else '' }}"
+
+        # Extract RC number: v2.5.0-rc.3 → 3
+        rc_number: "{{ image_tag | regex_replace('.*-rc[.]([0-9]+).*', '\\1') if 'rc' in image_tag else '' }}"
+
+        # Extract pre-release label: v1.0.0-beta.3 → beta.3
+        prerelease_label: "{{ image_tag | regex_replace('^v[0-9]+[.][0-9]+[.][0-9]+-(.+)', '\\1') if '-' in image_tag and deploy_reason not in ['hotfix','feature'] else '' }}"
+
+    - name: "Show routing decision"
+      ansible.builtin.debug:
+        msg:
+          - "══════════════════════════════════════════════"
+          - "  EDA Regex Demo — Image Tag Router"
+          - "══════════════════════════════════════════════"
+          - "  Original tag     : {{ image_tag }}"
+          - "  Clean version     : {{ clean_version }}"
+          - "  Base version      : {{ base_version }}"
+          - "  Major.Minor       : {{ major_minor }}"
+          - "  K8s-safe tag      : {{ k8s_safe_tag }}"
+          - "  Target env        : {{ target_env }}"
+          - "  Priority          : {{ priority }}"
+          - "  Deploy reason     : {{ deploy_reason }}"
+          - "  Repository        : {{ repo }}"
+          - "  Pushed by         : {{ pushed_by }}"
+          - "══════════════════════════════════════════════"
+
+    - name: "Show release candidate details"
+      ansible.builtin.debug:
+        msg: "RC number: {{ rc_number }}  |  Base: {{ base_version }}"
+      when: "'rc' in image_tag"
+
+    - name: "Show feature branch details"
+      ansible.builtin.debug:
+        msg: "Branch: {{ branch_name }}  |  K8s slug: {{ branch_slug }}"
+      when: deploy_reason == "feature"
+
+    - name: "Show prerelease label"
+      ansible.builtin.debug:
+        msg: "Pre-release label: {{ prerelease_label }}"
+      when: "prerelease_label | length > 0"
+
+    - name: "Simulate deploy"
+      ansible.builtin.debug:
+        msg:
+          - "DEPLOY {{ repo }}:{{ image_tag }}"
+          - "  → env: {{ target_env }}  priority: {{ priority }}"
+          - "  → k8s image tag: {{ k8s_safe_tag }}"
+          - "  (production: helm upgrade / kubectl set image)"
+
+    - name: "Write audit record"
+      ansible.builtin.copy:
+        content: |
+          {
+            "timestamp": "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}",
+            "image_tag": "{{ image_tag }}",
+            "clean_version": "{{ clean_version }}",
+            "base_version": "{{ base_version }}",
+            "k8s_safe_tag": "{{ k8s_safe_tag }}",
+            "target_env": "{{ target_env }}",
+            "priority": "{{ priority }}",
+            "deploy_reason": "{{ deploy_reason }}",
+            "repo": "{{ repo }}",
+            "pushed_by": "{{ pushed_by }}"
+          }
+        dest: "/tmp/eda_regex_{{ k8s_safe_tag }}_{{ lookup('pipe', 'date +%s') }}.json"
+      delegate_to: localhost

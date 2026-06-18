@@ -1,0 +1,48 @@
+---
+# Playbook: EDA Sample Event Handler
+# Called by: EDA-Sample-Webhook-Handler job template
+# Receives extra_vars from the EDA rulebook:
+#   - eda_event_action
+#   - eda_event_target
+#   - eda_event_version
+#   - eda_event_raw
+#   - eda_source_host
+
+- name: "Handle EDA webhook event"
+  hosts: "{{ eda_event_target | default('localhost') }}"
+  gather_facts: false
+
+  vars:
+    # Provide safe defaults in case EDA vars are not passed
+    eda_event_action: "{{ eda_event_action | default('unknown') }}"
+    eda_event_target: "{{ eda_event_target | default('all') }}"
+    eda_event_version: "{{ eda_event_version | default('') }}"
+    eda_event_raw: "{{ eda_event_raw | default('{}') }}"
+    eda_source_host: "{{ eda_source_host | default('unknown') }}"
+
+  tasks:
+    - name: "Log received event details"
+      ansible.builtin.debug:
+        msg:
+          - "=== EDA Event Received ==="
+          - "Action:  {{ eda_event_action }}"
+          - "Target:  {{ eda_event_target }}"
+          - "Version: {{ eda_event_version }}"
+          - "Source:  {{ eda_source_host }}"
+          - "Raw payload: {{ eda_event_raw }}"
+
+    - name: "Perform action based on event type"
+      ansible.builtin.debug:
+        msg: "Executing action '{{ eda_event_action }}' against '{{ eda_event_target }}'"
+
+    - name: "Record event in audit log"
+      ansible.builtin.copy:
+        content: |
+          timestamp={{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ')) }}
+          action={{ eda_event_action }}
+          target={{ eda_event_target }}
+          version={{ eda_event_version }}
+          source={{ eda_source_host }}
+        dest: "/tmp/eda_event_{{ ansible_date_time.epoch | default('0') }}.log"
+      delegate_to: localhost
+      ignore_errors: true

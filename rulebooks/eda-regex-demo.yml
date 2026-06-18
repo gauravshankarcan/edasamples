@@ -1,0 +1,144 @@
+---
+# EDA Sample: Regex in Conditions + regex_replace in Playbook
+#
+# ── Regex in EDA rulebook conditions ──────────────────────────────────────────
+#
+#   is match("pattern")   — anchored at start (Python re.match)
+#   is search("pattern")  — substring anywhere (Python re.search)
+#   is regex("pattern")   — alias for is match
+#
+#   IMPORTANT: use [0-9] instead of \d and [.] instead of \. in condition
+#   patterns.  ansible-rulebook 1.1.7 passes the pattern string as-is to
+#   Python re, so double-backslash escaping inside the YAML condition value
+#   is tricky.  Character classes are unambiguous.
+#
+# ── regex_replace in extra_vars ───────────────────────────────────────────────
+#
+#   The Jinja2 environment inside ansible-rulebook's run_job_template does NOT
+#   include Ansible's regex_replace filter (it is a bare Jinja2 env).
+#   The recommended approach is:
+#     1. Route/classify the event in the RULEBOOK condition (is match/search)
+#     2. Pass the raw value + routing metadata to the job template
+#     3. Use | regex_replace() in the PLAYBOOK where Ansible's full filter set
+#        is available.
+#
+# Scenario: CI/CD image tag router
+#   An image push webhook fires with an image_tag field.
+#   The tag format determines which pipeline and environment to target.
+#
+# Tag conventions:
+#   v2.5.0              → stable production release
+#   v2.5.0-rc.1         → release candidate → staging
+#   v1.0.0-beta.3       → beta → dev
+#   hotfix/v2.4.9       → hotfix → production (high priority)
+#   feature/add-oauth   → feature branch → dev
+#
+# Test:
+#   WEBHOOK="https://eda-regex-demo-activation.apps-crc.testing"
+#   curl -X POST "$WEBHOOK" -H "Content-Type: application/json" \
+#     -d '{"image_tag":"v2.5.0","repo":"org/api","pushed_by":"ci-bot"}'
+
+- name: "EDA Regex Demo - CI/CD Image Tag Router"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+
+    # ── Rule 1: Hotfix ────────────────────────────────────────────────────────
+    # is match — anchored, must start with "hotfix/v" then digits.dots
+    - name: "Route hotfix to production (high priority)"
+      condition: event.payload.image_tag is match("hotfix/v[0-9]+[.][0-9]+[.][0-9]+.*")
+      action:
+        run_job_template:
+          name: "EDA-Regex-Demo"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              image_tag: "{{ event.payload.image_tag }}"
+              target_env: "production"
+              priority: "high"
+              deploy_reason: "hotfix"
+              repo: "{{ event.payload.repo | default('unknown') }}"
+              pushed_by: "{{ event.payload.pushed_by | default('unknown') }}"
+
+    # ── Rule 2: Release candidate ─────────────────────────────────────────────
+    # is match — anchored, vX.Y.Z-rc.N format
+    - name: "Route release candidate to staging"
+      condition: event.payload.image_tag is match("v[0-9]+[.][0-9]+[.][0-9]+-rc[.][0-9]+.*")
+      action:
+        run_job_template:
+          name: "EDA-Regex-Demo"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              image_tag: "{{ event.payload.image_tag }}"
+              target_env: "staging"
+              priority: "normal"
+              deploy_reason: "release-candidate"
+              repo: "{{ event.payload.repo | default('unknown') }}"
+              pushed_by: "{{ event.payload.pushed_by | default('unknown') }}"
+
+    # ── Rule 3: Beta pre-release ──────────────────────────────────────────────
+    # is search — substring match, tag contains "-beta." anywhere
+    - name: "Route beta build to dev"
+      condition: event.payload.image_tag is search("-beta[.]")
+      action:
+        run_job_template:
+          name: "EDA-Regex-Demo"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              image_tag: "{{ event.payload.image_tag }}"
+              target_env: "dev"
+              priority: "low"
+              deploy_reason: "prerelease-beta"
+              repo: "{{ event.payload.repo | default('unknown') }}"
+              pushed_by: "{{ event.payload.pushed_by | default('unknown') }}"
+
+    # ── Rule 4: Feature branch ────────────────────────────────────────────────
+    # is match — anchored, must start with "feature/"
+    - name: "Route feature branch to dev"
+      condition: event.payload.image_tag is match("feature/.*")
+      action:
+        run_job_template:
+          name: "EDA-Regex-Demo"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              image_tag: "{{ event.payload.image_tag }}"
+              target_env: "dev"
+              priority: "low"
+              deploy_reason: "feature"
+              repo: "{{ event.payload.repo | default('unknown') }}"
+              pushed_by: "{{ event.payload.pushed_by | default('unknown') }}"
+
+    # ── Rule 5: Stable release ────────────────────────────────────────────────
+    # is match — anchored, exact vX.Y.Z with nothing after the patch number
+    # Must be AFTER rc/beta rules or "v2.5.0-rc.1" would fall here first
+    - name: "Route stable release to production"
+      condition: event.payload.image_tag is match("v[0-9]+[.][0-9]+[.][0-9]+$")
+      action:
+        run_job_template:
+          name: "EDA-Regex-Demo"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              image_tag: "{{ event.payload.image_tag }}"
+              target_env: "production"
+              priority: "normal"
+              deploy_reason: "stable-release"
+              repo: "{{ event.payload.repo | default('unknown') }}"
+              pushed_by: "{{ event.payload.pushed_by | default('unknown') }}"
+
+    # ── Rule 6: Catch-all reject ──────────────────────────────────────────────
+    - name: "Reject unrecognised tag format"
+      condition: event.payload.image_tag is defined
+      action:
+        debug:
+          msg: >-
+            REJECTED: '{{ event.payload.image_tag }}' does not match any known
+            tag pattern (vX.Y.Z, vX.Y.Z-rc.N, vX.Y.Z-beta.N, hotfix/vX.Y.Z,
+            feature/<name>).

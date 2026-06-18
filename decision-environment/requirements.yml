@@ -1,0 +1,25 @@
+---
+# Collections required in the Decision Environment
+# These are needed by the EDA rulebook event sources AND
+# any playbooks executed with run_playbook (not run_job_template).
+#
+# For run_job_template: collections go in the Execution Environment, not the DE.
+# For run_playbook: collections must be in the DE image.
+
+collections:
+  # Core EDA event source plugins — REQUIRED in every DE
+  - name: ansible.eda
+    version: ">=1.0.0"
+
+  # AWS event sources and modules
+  # Provides: ansible.eda.aws_sqs_queue, community.aws.ec2_instance, etc.
+  - name: community.aws
+    version: ">=8.0.0"
+
+  # General purpose modules useful in EDA playbooks
+  - name: ansible.utils
+    version: ">=2.0.0"
+
+  # Posix / file operations
+  - name: ansible.posix
+    version: ">=1.0.0"

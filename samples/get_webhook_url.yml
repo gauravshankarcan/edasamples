@@ -1,0 +1,72 @@
+---
+# get_webhook_url.yml — Prints the webhook URL for the sample activation.
+#
+# Usage:
+#   ansible-playbook samples/get_webhook_url.yml
+#   ansible-playbook samples/get_webhook_url.yml -e activation_name=eda-param-samples-activation
+
+- name: "Get EDA Webhook URL"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aap_base: "{{ lookup('env', 'AAP_BASE') | default('https://aap-aap.apps-crc.testing', true) }}"
+    aap_pass: "{{ lookup('env', 'AAP_PASS') }}"
+    aap_user: "admin"
+    activation_name: "{{ activation | default('sample-webhook-activation') }}"
+    eda_api: "{{ aap_base }}/api/eda/v1"
+
+  tasks:
+    - name: "Get activation details"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/?name={{ activation_name }}"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _act
+
+    - name: "Fail if activation not found"
+      ansible.builtin.fail:
+        msg: "Activation '{{ activation_name }}' not found. Run setup_aap.yml first."
+      when: _act.json.results | length == 0
+
+    - name: "Set activation details"
+      ansible.builtin.set_fact:
+        act_id: "{{ _act.json.results[0].id }}"
+        act_port: "{{ _act.json.results[0].service_port | default(5000) }}"
+        act_service_url: "{{ _act.json.results[0].service_url | default('') }}"
+
+    - name: "Get activation instances"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activation-instances/?activation_id={{ act_id }}"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _instances
+
+    - name: "Display activation instance webhook URL"
+      ansible.builtin.debug:
+        msg:
+          - "Activation: {{ activation_name }}"
+          - "Instance port: {{ _instances.json.results[0].port | default(act_port) }}"
+          - "Test URL: http://localhost:{{ _instances.json.results[0].port | default(act_port) }}"
+      when: _instances.json.results | length > 0
+
+    - name: "Get event streams for activation"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/event-streams/?name=sample-webhook"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _streams
+
+    - name: "Display event stream URLs"
+      ansible.builtin.debug:
+        msg: "Event Stream: {{ item.url | default('?') }}  Name: {{ item.name | default('?') }}"
+      loop: "{{ _streams.json.results | default([]) }}"
+      loop_control:
+        label: "{{ item.name | default('?') }}"

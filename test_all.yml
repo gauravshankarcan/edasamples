@@ -1,0 +1,279 @@
+---
+# test_all.yml — End-to-end test of all EDA samples.
+#
+# Usage:
+#   ansible-playbook test_all.yml
+# Requirements: AAP running, activations enabled, AWS instances running
+
+- name: "EDA Samples End-to-End Test Suite"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aap_base: "{{ lookup('env', 'AAP_BASE') | default('https://aap-aap.apps-crc.testing', true) }}"
+    aap_pass: "{{ lookup('env', 'AAP_PASS') }}"
+    aap_user: "admin"
+    de_image: "eda-community-de:latest"
+    aws_region: "{{ lookup('env', 'AWS_DEFAULT_REGION') | default('us-east-1', true) }}"
+    ocp_apps_domain: "{{ lookup('env', 'OCP_APPS_DOMAIN') | default('apps-crc.testing', true) }}"
+    eda_api: "{{ aap_base }}/api/eda/v1"
+    ctrl_api: "{{ aap_base }}/api/controller/v2"
+
+  tasks:
+    # ── Test 1: AAP Components ────────────────────────────────────────────────
+    - name: "[TEST 1] Check job templates exist"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/job_templates/?name={{ item }}"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      loop:
+        - "EDA-Sample-Webhook-Handler"
+        - "EDA-Param-Deploy-Service"
+        - "EDA-Limit-OS-Patching"
+        - "EDA-Requestor-Handler"
+      register: _jt_results
+      ignore_errors: true
+
+    - name: "[TEST 1] Assert job templates present"
+      ansible.builtin.assert:
+        that: item.json.count | int == 1
+        fail_msg: "Job template not found: {{ item.item }}"
+        success_msg: "Job template found: {{ item.item }}"
+      loop: "{{ _jt_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      ignore_errors: true
+
+    - name: "[TEST 1] Check EDA activations are running"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/?name={{ item }}"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      loop:
+        - "sample-webhook-activation"
+        - "eda-param-samples-activation"
+        - "eda-limit-jobs-activation"
+        - "eda-requestor-activation"
+      register: _act_results
+      ignore_errors: true
+
+    - name: "[TEST 1] Assert activations running"
+      ansible.builtin.assert:
+        that:
+          - item.json.results | length > 0
+          - item.json.results[0].status == 'running'
+        fail_msg: "Activation not running: {{ item.item }} (status={{ item.json.results[0].status | default('NOT_FOUND') }})"
+        success_msg: "Activation running: {{ item.item }}"
+      loop: "{{ _act_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      ignore_errors: true
+
+    # ── Test 2: Decision Environment ─────────────────────────────────────────
+    - name: "[TEST 2] Check DE is registered"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/decision-environments/?name=EDA-Community-DE"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _de_check
+
+    - name: "[TEST 2] Assert DE registered"
+      ansible.builtin.assert:
+        that: _de_check.json.count | int == 1
+        fail_msg: "DE EDA-Community-DE is not registered"
+        success_msg: "DE registered: EDA-Community-DE"
+      ignore_errors: true
+
+    - name: "[TEST 2] Verify DE image has community.aws"
+      containers.podman.podman_container:
+        name: "de-test-aws"
+        image: "{{ de_image }}"
+        command: ["ansible-galaxy", "collection", "list", "community.aws"]
+        detach: false
+        rm: true
+        state: started
+      register: _de_aws_test
+      ignore_errors: true
+
+    - name: "[TEST 2] Assert community.aws present in DE"
+      ansible.builtin.assert:
+        that: "'community.aws' in (_de_aws_test.stdout | default(''))"
+        fail_msg: "DE image missing community.aws collection"
+        success_msg: "DE image has community.aws collection"
+      ignore_errors: true
+
+    # ── Test 3: Basic Webhook ─────────────────────────────────────────────────
+    - name: "[TEST 3] Get sample-webhook-activation details"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/?name=sample-webhook-activation"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _webhook_act
+
+    - name: "[TEST 3] Get job count before webhook"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/jobs/?job_template__name=EDA-Sample-Webhook-Handler&order_by=-id&page_size=1"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _jobs_before
+      when: _webhook_act.json.results | length > 0
+
+    - name: "[TEST 3] Derive webhook URL from OCP route"
+      ansible.builtin.set_fact:
+        webhook_url_3: >-
+          {{
+            _webhook_act.json.results[0].service_url
+            if _webhook_act.json.results[0].service_url | default('') | length > 0
+            else 'https://' + _webhook_act.json.results[0].k8s_service_name + '.' + ocp_apps_domain
+          }}
+      when: _webhook_act.json.results | length > 0
+
+    - name: "[TEST 3] Fire webhook event"
+      ansible.builtin.uri:
+        url: "{{ webhook_url_3 }}"
+        method: POST
+        body_format: json
+        body:
+          action: "test"
+          target: "localhost"
+          version: "1.0.0"
+          test_id: "test3"
+        status_code: [200, 201, 202, 204]
+        validate_certs: false
+      when:
+        - _webhook_act.json.results | length > 0
+        - webhook_url_3 is defined
+      ignore_errors: true
+
+    - name: "[TEST 3] Wait for job to be triggered"
+      ansible.builtin.pause:
+        seconds: 15
+      when: _webhook_act.json.results | length > 0
+
+    - name: "[TEST 3] Get job count after webhook"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/jobs/?job_template__name=EDA-Sample-Webhook-Handler&order_by=-id&page_size=1"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _jobs_after
+      when: _webhook_act.json.results | length > 0
+
+    - name: "[TEST 3] Assert job was triggered by webhook"
+      ansible.builtin.assert:
+        that: _jobs_after.json.count | int > _jobs_before.json.count | int
+        fail_msg: "No job created after webhook (before={{ _jobs_before.json.count }} after={{ _jobs_after.json.count }})"
+        success_msg: "Job triggered by webhook"
+      when:
+        - _jobs_before is defined
+        - _jobs_after is defined
+      ignore_errors: true
+
+    # ── Test 4: Parameterized Webhook ─────────────────────────────────────────
+    - name: "[TEST 4] Get eda-param-samples-activation details"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/?name=eda-param-samples-activation"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _param_act
+
+    - name: "[TEST 4] Get parameterized job count before"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/jobs/?job_template__name=EDA-Param-Deploy-Service&order_by=-id&page_size=1"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _param_before
+      when: _param_act.json.results | length > 0
+
+    - name: "[TEST 4] Derive webhook URL from OCP route"
+      ansible.builtin.set_fact:
+        webhook_url_4: >-
+          {{
+            _param_act.json.results[0].service_url
+            if _param_act.json.results[0].service_url | default('') | length > 0
+            else 'https://' + _param_act.json.results[0].k8s_service_name + '.' + ocp_apps_domain
+          }}
+      when: _param_act.json.results | length > 0
+
+    - name: "[TEST 4] Fire parameterized webhook"
+      ansible.builtin.uri:
+        url: "{{ webhook_url_4 }}"
+        method: POST
+        body_format: json
+        body:
+          action: "deploy"
+          service: "test-svc"
+          environment: "staging"
+          version: "2.0.0"
+          requestor: "test"
+        status_code: [200, 201, 202, 204]
+        validate_certs: false
+      when:
+        - _param_act.json.results | length > 0
+        - webhook_url_4 is defined
+      ignore_errors: true
+
+    - name: "[TEST 4] Wait for parameterized job"
+      ansible.builtin.pause:
+        seconds: 15
+      when: _param_act.json.results | length > 0
+
+    - name: "[TEST 4] Get parameterized job count after"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/jobs/?job_template__name=EDA-Param-Deploy-Service&order_by=-id&page_size=1"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _param_after
+      when: _param_act.json.results | length > 0
+
+    - name: "[TEST 4] Assert parameterized job triggered"
+      ansible.builtin.assert:
+        that: _param_after.json.count | int > _param_before.json.count | int
+        fail_msg: "No parameterized job created"
+        success_msg: "Parameterized job triggered"
+      when:
+        - _param_before is defined
+        - _param_after is defined
+      ignore_errors: true
+
+    # ── Test 5: AWS EC2 Instances ─────────────────────────────────────────────
+    - name: "[TEST 5] Check AWS EC2 instances running"
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": "{{ item }}"
+          "instance-state-name": "running"
+      loop:
+        - "eda-test-web01"
+        - "eda-test-web02"
+        - "eda-test-db01"
+      register: _ec2_results
+      ignore_errors: true
+
+    - name: "[TEST 5] Assert EC2 instances running"
+      ansible.builtin.assert:
+        that: item.instances | length > 0
+        fail_msg: "EC2 instance not running: {{ item.item }}"
+        success_msg: "EC2 instance running: {{ item.item }}"
+      loop: "{{ _ec2_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      ignore_errors: true

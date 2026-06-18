@@ -1,0 +1,137 @@
+---
+# Playbook: Create AWS EC2 test instances for EDA limit demo
+# Usage:
+#   ansible-playbook aws/create_test_instances.yml \
+#     -e aws_region=us-east-1 \
+#     -e key_pair_name=my-keypair
+#
+# Creates 3 EC2 instances:
+#   eda-test-web01  (group: webservers, env: staging)
+#   eda-test-web02  (group: webservers, env: staging)
+#   eda-test-db01   (group: databases, env: staging)
+#
+# After running, the dynamic inventory will expose groups:
+#   - webservers
+#   - databases
+#   - tag_Environment_staging
+#   - tag_Group_webservers
+
+- name: "Create EDA test EC2 instances"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    aws_region: "{{ aws_region | default('us-east-1') }}"
+    key_pair_name: "{{ key_pair_name | default('eda-test-key') }}"
+    instance_type: "t3.micro"
+    # Amazon Linux 2023 AMI (us-east-1) — update for your region
+    ami_id: "{{ ami_id | default('ami-0182f373e66f89c85') }}"
+    vpc_subnet_id: "{{ vpc_subnet_id | default(omit) }}"
+    vpc_id: "{{ vpc_id | default(omit) }}"
+    security_group: "{{ sg_name | default('eda-test-sg') }}"
+    owner_tag: "eda-samples"
+
+    instances:
+      - name: "eda-test-web01"
+        group: "webservers"
+        environment: "staging"
+        role: "web"
+      - name: "eda-test-web02"
+        group: "webservers"
+        environment: "staging"
+        role: "web"
+      - name: "eda-test-db01"
+        group: "databases"
+        environment: "staging"
+        role: "database"
+
+  tasks:
+    - name: "Create security group for test instances"
+      amazon.aws.ec2_security_group:
+        name: "{{ sg_name | default('eda-test-sg') }}"
+        description: "EDA test instances security group"
+        region: "{{ aws_region }}"
+        vpc_id: "{{ vpc_id | default(omit) }}"
+        rules:
+          - proto: tcp
+            ports: [22]
+            cidr_ip: "0.0.0.0/0"
+            rule_desc: "SSH for Ansible"
+          - proto: tcp
+            ports: [80, 443]
+            cidr_ip: "0.0.0.0/0"
+            rule_desc: "HTTP/S"
+        rules_egress:
+          - proto: all
+            cidr_ip: "0.0.0.0/0"
+        tags:
+          Name: "{{ sg_name | default('eda-test-sg') }}"
+          Owner: "{{ owner_tag }}"
+      register: sg_result
+
+    - name: "Create EC2 key pair (creates only if not exists)"
+      amazon.aws.ec2_key:
+        name: "{{ key_pair_name }}"
+        region: "{{ aws_region }}"
+      register: key_result
+
+    - name: "Save private key (only on creation)"
+      ansible.builtin.copy:
+        content: "{{ key_result.key.private_key }}"
+        dest: "/tmp/{{ key_pair_name }}.pem"
+        mode: "0600"
+      when:
+        - key_result is changed
+        - key_result.key.private_key is defined
+
+    - name: "Launch test EC2 instances"
+      amazon.aws.ec2_instance:
+        name: "{{ item.name }}"
+        key_name: "{{ key_pair_name }}"
+        instance_type: "{{ instance_type }}"
+        image_id: "{{ ami_id }}"
+        region: "{{ aws_region }}"
+        vpc_subnet_id: "{{ vpc_subnet_id | default(omit) }}"
+        security_group: "{{ sg_name | default('eda-test-sg') }}"
+        network:
+          assign_public_ip: true
+        wait: true
+        state: running
+        tags:
+          Name: "{{ item.name }}"
+          Group: "{{ item.group }}"
+          Environment: "{{ item.environment }}"
+          Role: "{{ item.role }}"
+          Owner: "{{ owner_tag }}"
+          # These tags become inventory groups in the dynamic inventory:
+          # tag_Group_webservers, tag_Environment_staging, etc.
+      loop: "{{ instances }}"
+      register: ec2_results
+
+    - name: "Display created instances"
+      ansible.builtin.debug:
+        msg:
+          - "Instance: {{ item.item.name }}"
+          - "  ID:  {{ item.instances[0].instance_id }}"
+          - "  IP:  {{ item.instances[0].public_ip_address | default('No public IP') }}"
+          - "  DNS: {{ item.instances[0].public_dns_name | default('No DNS') }}"
+      loop: "{{ ec2_results.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: "Display limit examples for EDA"
+      ansible.builtin.debug:
+        msg:
+          - "════════════════════════════════════════"
+          - "  EDA Limit Examples"
+          - "  (use in webhook payload as target_hosts)"
+          - "════════════════════════════════════════"
+          - "  Single host:     eda-test-web01"
+          - "  Multiple hosts:  eda-test-web01,eda-test-web02"
+          - "  By group:        webservers"
+          - "  By tag group:    tag_Group_webservers"
+          - "  By environment:  tag_Environment_staging"
+          - "  All test hosts:  tag_Owner_eda-samples"
+          - "  Wildcard:        eda-test-web*"
+          - "════════════════════════════════════════"

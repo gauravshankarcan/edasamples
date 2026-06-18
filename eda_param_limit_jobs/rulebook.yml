@@ -1,0 +1,129 @@
+---
+# EDA Sample: Job Template with 'limit' — Run Against Specific Hosts
+#
+# The 'limit' parameter in run_job_template restricts which hosts the playbook
+# runs against — exactly like the --limit flag in ansible-playbook.
+#
+# This sample uses AWS EC2 instances (created by aws/create_test_instances.yml)
+# as the target inventory. An EDA event carries the target hostname(s) and
+# the job template is limited to only those hosts.
+#
+# Key concept: The inventory in AAP has ALL your EC2 hosts. The EDA event
+# specifies WHICH hosts need action today — without needing a separate inventory
+# per environment or team.
+#
+# Payload schema:
+#   {
+#     "action":      "patching | compliance_check | restart_service | reboot",
+#     "target_hosts": "web01,web02"   OR  "tag_Environment_production"  OR  "webservers",
+#     "service_name": "nginx"          (for restart_service action only),
+#     "requestor":   "ops-team",
+#     "change_id":   "CHG0001234"
+#   }
+#
+# Test:
+#   curl -X POST http://<activation-url> \
+#     -H "Content-Type: application/json" \
+#     -d '{
+#       "action": "patching",
+#       "target_hosts": "eda-test-web01",
+#       "requestor": "ops-team",
+#       "change_id": "CHG001"
+#     }'
+
+- name: "EDA Job Template with Limit"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    aap_organization: "Default"
+    default_limit: "eda-test-hosts"   # Default limit if event doesn't specify
+
+  rules:
+    # ── Rule 1: Patching — limit to specified hosts ──────────────────────────
+    - name: "Trigger patching for specified hosts"
+      condition: >
+        event.payload.action == "patching" and
+        event.payload.target_hosts is defined
+      action:
+        run_job_template:
+          name: "EDA-Limit-OS-Patching"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            # 'limit' restricts the job to only these hosts from the inventory
+            # Supports: hostname, group name, wildcard, comma-separated list
+            limit: "{{ event.payload.target_hosts }}"
+            extra_vars:
+              param_action: "patching"
+              param_requestor: "{{ event.payload.requestor | default('eda') }}"
+              param_change_id: "{{ event.payload.change_id | default('') }}"
+              eda_target_hosts: "{{ event.payload.target_hosts }}"
+
+    # ── Rule 2: Compliance check with limit ─────────────────────────────────
+    - name: "Run compliance check on specified hosts"
+      condition: >
+        event.payload.action == "compliance_check" and
+        event.payload.target_hosts is defined
+      action:
+        run_job_template:
+          name: "EDA-Limit-OS-Patching"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            limit: "{{ event.payload.target_hosts }}"
+            extra_vars:
+              param_action: "compliance_check"
+              param_requestor: "{{ event.payload.requestor | default('eda') }}"
+              param_change_id: "{{ event.payload.change_id | default('') }}"
+
+    # ── Rule 3: Restart service — limit to specified hosts ──────────────────
+    - name: "Restart service on specified hosts"
+      condition: >
+        event.payload.action == "restart_service" and
+        event.payload.target_hosts is defined and
+        event.payload.service_name is defined
+      action:
+        run_job_template:
+          name: "EDA-Limit-OS-Patching"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            limit: "{{ event.payload.target_hosts }}"
+            extra_vars:
+              param_action: "restart_service"
+              param_service_name: "{{ event.payload.service_name }}"
+              param_requestor: "{{ event.payload.requestor | default('eda') }}"
+
+    # ── Rule 4: AWS tag-based limit ─────────────────────────────────────────
+    # AWS EC2 dynamic inventory creates groups like: tag_Environment_production
+    # You can use these as limits to target all hosts with a specific tag
+    - name: "Target by AWS tag"
+      condition: >
+        event.payload.action is defined and
+        event.payload.aws_tag_key is defined and
+        event.payload.aws_tag_value is defined
+      action:
+        run_job_template:
+          name: "EDA-Limit-OS-Patching"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            # AWS dynamic inventory creates groups: tag_<TagKey>_<TagValue>
+            limit: "tag_{{ event.payload.aws_tag_key }}_{{ event.payload.aws_tag_value }}"
+            extra_vars:
+              param_action: "{{ event.payload.action }}"
+              param_requestor: "{{ event.payload.requestor | default('eda') }}"
+              eda_aws_filter: "tag_{{ event.payload.aws_tag_key }}_{{ event.payload.aws_tag_value }}"
+
+    # ── Rule 5: Fallback — no target specified ───────────────────────────────
+    - name: "Reject events without target_hosts"
+      condition: >
+        event.payload.action is defined and
+        event.payload.target_hosts is not defined and
+        event.payload.aws_tag_key is not defined
+      action:
+        debug:
+          msg: >-
+            REJECTED: Event has action '{{ event.payload.action }}' but no
+            target_hosts or aws_tag_key/aws_tag_value specified.
+            Refusing to run against ALL hosts without explicit limit.

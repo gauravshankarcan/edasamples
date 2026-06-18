@@ -1,0 +1,242 @@
+---
+# setup_all_aap.yml — Complete AAP EDA setup: credentials, activations, optional AWS credential.
+#
+# Prerequisites (already completed):
+#   - Git repo accessible and pushed
+#   - DE image built and pushed to OCP imagestream
+#   - Inventory, Project, Job Templates created in Controller
+#   - EDA Project synced and rulebooks imported
+#   - Decision Environment registered in EDA
+#
+# Creates:
+#   - AAP Controller credential for EDA (if not exists)
+#   - 4 Rulebook Activations (one per sample)
+#   - AWS credential in Controller (when aws_access_key/aws_secret_key are set)
+#
+# Usage:
+#   ansible-playbook setup_all_aap.yml
+#   ansible-playbook setup_all_aap.yml -e aws_access_key=KEY -e aws_secret_key=SECRET
+
+- name: "AAP EDA Complete Setup"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aap_base: "{{ lookup('env', 'AAP_BASE') | default('https://aap-aap.apps-crc.testing', true) }}"
+    aap_pass: "{{ lookup('env', 'AAP_PASS') }}"
+    aap_user: "admin"
+    aws_access_key: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') | default('', true) }}"
+    aws_secret_key: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') | default('', true) }}"
+    ocp_api_url: "{{ lookup('env', 'OCP_API_URL') | default('https://api.crc.testing:6443', true) }}"
+    ocp_username: "{{ lookup('env', 'OCP_USERNAME') | default('kubeadmin', true) }}"
+    ocp_password: "{{ lookup('env', 'OCP_PASSWORD') | default('', true) }}"
+    kubeconfig_path: "{{ lookup('env', 'KUBECONFIG') | default('/tmp/kubeconfig-eda-session', true) }}"
+    eda_api: "{{ aap_base }}/api/eda/v1"
+    ctrl_api: "{{ aap_base }}/api/controller/v2"
+
+    activation_definitions:
+      - name: "sample-webhook-activation"
+        description: "Basic webhook to job template sample"
+        rulebook_name: "samples-webhook.yml"
+      - name: "eda-param-samples-activation"
+        description: "Parameterized webhook extra vars demo"
+        rulebook_name: "eda-param-deploy.yml"
+      - name: "eda-limit-jobs-activation"
+        description: "Webhook with job template limit"
+        rulebook_name: "eda-limit-jobs.yml"
+      - name: "eda-requestor-activation"
+        description: "Requester-response callback pattern"
+        rulebook_name: "eda-requestor.yml"
+
+  tasks:
+    - name: "Reconnect to OCP cluster"
+      ansible.builtin.command:
+        argv:
+          - oc
+          - login
+          - -u
+          - "{{ ocp_username }}"
+          - -p
+          - "{{ ocp_password }}"
+          - "{{ ocp_api_url }}"
+          - --insecure-skip-tls-verify=true
+          - --kubeconfig
+          - "{{ kubeconfig_path }}"
+      register: _oc_login
+      changed_when: "'Logged into' in _oc_login.stdout"
+      failed_when: _oc_login.rc != 0
+      no_log: true
+      when: ocp_password | length > 0
+
+    - name: "Get Decision Environment"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/decision-environments/?name=EDA-Community-DE"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _de
+
+    - name: "Get EDA Project"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/?name=EDA-Samples-EDA-Project"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _proj
+
+    - name: "Assert required EDA resources exist"
+      ansible.builtin.assert:
+        that:
+          - _de.json.results | length > 0
+          - _proj.json.results | length > 0
+        fail_msg: "EDA Decision Environment or Project not found. Build the DE and run configure_aap.yml first."
+
+    - name: "Set DE and Project IDs"
+      ansible.builtin.set_fact:
+        de_id: "{{ _de.json.results[0].id }}"
+        proj_id: "{{ _proj.json.results[0].id }}"
+
+    - name: "Display resource IDs"
+      ansible.builtin.debug:
+        msg: "DE={{ de_id }}  Project={{ proj_id }}"
+
+    - name: "Get rulebook IDs"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/rulebooks/?name={{ item.rulebook_name }}"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      loop: "{{ activation_definitions }}"
+      loop_control:
+        label: "{{ item.rulebook_name }}"
+      register: _rulebooks
+
+    - name: "Check for existing EDA-AAP-Controller-Credential"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/eda-credentials/?name=EDA-AAP-Controller-Credential"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _cred_check
+
+    - name: "Create EDA-AAP-Controller-Credential"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/eda-credentials/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "EDA-AAP-Controller-Credential"
+          description: "AAP Controller credential for EDA to trigger job templates"
+          credential_type_id: 4
+          organization_id: 1
+          inputs:
+            host: "{{ aap_base }}/api/controller/"
+            username: "{{ aap_user }}"
+            password: "{{ aap_pass }}"
+            verify_ssl: false
+        status_code: [200, 201]
+      register: _new_cred
+      when: _cred_check.json.results | length == 0
+      no_log: true
+
+    - name: "Set credential ID"
+      ansible.builtin.set_fact:
+        eda_cred_id: >-
+          {{
+            _cred_check.json.results[0].id
+            if _cred_check.json.results | length > 0
+            else _new_cred.json.id
+          }}
+
+    - name: "Check if activation already exists"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/?name={{ item.item.name }}"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      loop: "{{ _rulebooks.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: _act_checks
+
+    - name: "Create rulebook activations"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "{{ item.item.item.name }}"
+          description: "{{ item.item.item.description }}"
+          rulebook_id: "{{ item.item.json.results[0].id }}"
+          decision_environment_id: "{{ de_id }}"
+          project_id: "{{ proj_id }}"
+          organization_id: 1
+          is_enabled: true
+          restart_policy: "on-failure"
+          eda_credentials:
+            - "{{ eda_cred_id }}"
+        status_code: [200, 201]
+      loop: "{{ _act_checks.results }}"
+      loop_control:
+        label: "{{ item.item.item.name }}"
+      when:
+        - item.json.results | length == 0
+        - item.item.json.results | length > 0
+
+    - name: "Create AWS credential in Controller"
+      awx.awx.credential:
+        name: "EDA-AWS-Credentials"
+        organization: Default
+        credential_type: "Amazon Web Services"
+        inputs:
+          username: "{{ aws_access_key }}"
+          password: "{{ aws_secret_key }}"
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_username: "{{ aap_user }}"
+        controller_password: "{{ aap_pass }}"
+        validate_certs: false
+      when: aws_access_key | length > 0 and aws_secret_key | length > 0
+      no_log: true
+
+    - name: "Attach AWS credential to EDA-Limit-OS-Patching job template"
+      awx.awx.job_template:
+        name: "EDA-Limit-OS-Patching"
+        credentials:
+          - "EDA-AWS-Credentials"
+        state: exists
+        controller_host: "{{ aap_base }}"
+        controller_username: "{{ aap_user }}"
+        controller_password: "{{ aap_pass }}"
+        validate_certs: false
+      when: aws_access_key | length > 0 and aws_secret_key | length > 0
+
+    - name: "Get activation status summary"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _status
+
+    - name: "Show activation status"
+      ansible.builtin.debug:
+        msg: "{{ item.name }}: {{ item.status | default('?') }}"
+      loop: "{{ _status.json.results | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"

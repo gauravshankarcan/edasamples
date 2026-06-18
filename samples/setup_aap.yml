@@ -1,0 +1,232 @@
+---
+# setup_aap.yml — Creates all AAP Controller and EDA objects for the webhook sample.
+#
+# Usage:
+#   ansible-playbook samples/setup_aap.yml \
+#     -e git_repo_url=https://git.example.com/org/edasamples
+#
+# Required:
+#   git_repo_url — SCM URL for the project containing playbooks and rulebooks
+#
+# Environment:
+#   AAP_BASE  — AAP gateway URL  (default: https://aap-aap.apps-crc.testing)
+#   AAP_TOKEN — AAP Bearer token
+#   AAP_PASS  — AAP admin password
+
+- name: "EDA Sample Setup — Webhook to Job Template"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aap_base: "{{ lookup('env', 'AAP_BASE') | default('https://aap-aap.apps-crc.testing', true) }}"
+    aap_token: "{{ lookup('env', 'AAP_TOKEN') | default('', true) }}"
+    aap_pass: "{{ lookup('env', 'AAP_PASS') }}"
+    aap_user: "admin"
+    de_base_image: "registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:latest"
+    eda_api: "{{ aap_base }}/api/eda/v1"
+
+  pre_tasks:
+    - name: "Verify git_repo_url is set"
+      ansible.builtin.assert:
+        that: git_repo_url is defined and git_repo_url | length > 0
+        fail_msg: "git_repo_url must be provided: -e git_repo_url=https://git.example.com/org/edasamples"
+
+  tasks:
+    # ── AAP Controller Objects ────────────────────────────────────────────────
+    - name: "Create Controller inventory"
+      awx.awx.inventory:
+        name: "EDA-Sample-Inventory"
+        description: "Localhost inventory for EDA samples"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      register: _inv
+
+    - name: "Add localhost host to inventory"
+      awx.awx.host:
+        name: localhost
+        inventory: EDA-Sample-Inventory
+        state: present
+        variables:
+          ansible_connection: local
+          ansible_python_interpreter: "{{ '{{' }} ansible_playbook_python {{ '}}' }}"
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      ignore_errors: true
+
+    - name: "Create Controller project"
+      awx.awx.project:
+        name: "EDA-Samples-Project"
+        description: "EDA sample playbooks"
+        scm_type: git
+        scm_url: "{{ git_repo_url }}"
+        scm_branch: main
+        scm_update_on_launch: true
+        organization: Default
+        wait: true
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      register: _proj
+
+    - name: "Create job template EDA-Sample-Webhook-Handler"
+      awx.awx.job_template:
+        name: "EDA-Sample-Webhook-Handler"
+        description: "Triggered by EDA webhook rulebook"
+        job_type: run
+        inventory: EDA-Sample-Inventory
+        project: EDA-Samples-Project
+        playbook: "samples/playbooks/handle_event.yml"
+        ask_variables_on_launch: true
+        organization: Default
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      register: _jt
+
+    # ── EDA Objects ───────────────────────────────────────────────────────────
+    - name: "Create gateway token for EDA"
+      ansible.builtin.uri:
+        url: "{{ aap_base }}/api/gateway/v1/tokens/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          description: "eda-samples-token"
+          scope: write
+        status_code: [200, 201]
+      register: _gw_token
+      no_log: true
+
+    - name: "Register controller token in EDA"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/users/me/awx-tokens/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "samples-controller-token"
+          token: "{{ _gw_token.json.token }}"
+          description: "Token for EDA samples to call AAP Controller"
+        status_code: [200, 201, 400]
+      no_log: true
+      ignore_errors: true
+
+    - name: "Get existing Decision Environments"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/decision-environments/"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _de_list
+
+    - name: "Create default Decision Environment if none exists"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/decision-environments/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "EDA-Default-DE"
+          image_url: "{{ de_base_image }}"
+          organization_id: 1
+        status_code: [200, 201]
+      register: _new_de
+      when: _de_list.json.results | length == 0
+
+    - name: "Set Decision Environment ID"
+      ansible.builtin.set_fact:
+        de_id: >-
+          {{
+            _de_list.json.results[0].id
+            if _de_list.json.results | length > 0
+            else _new_de.json.id
+          }}
+
+    - name: "Create EDA project"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "EDA-Samples-EDA-Project"
+          url: "{{ git_repo_url }}"
+          description: "EDA rulebooks for samples"
+          organization_id: 1
+        status_code: [200, 201, 400]
+      ignore_errors: true
+
+    - name: "Get EDA project ID"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/?name=EDA-Samples-EDA-Project"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _eda_proj
+
+    - name: "Wait for EDA project sync"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/{{ _eda_proj.json.results[0].id }}/"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _eda_proj_status
+      until: _eda_proj_status.json.import_state in ['completed', 'failed']
+      retries: 30
+      delay: 5
+      when: _eda_proj.json.results | length > 0
+
+    - name: "Create rulebook activation"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "sample-webhook-activation"
+          description: "Webhook to job template sample"
+          decision_environment_id: "{{ de_id }}"
+          project_id: "{{ _eda_proj.json.results[0].id }}"
+          rulebook_rulesets: "samples/rulebook.yml"
+          organization_id: 1
+          k8s_service_name: "sample-webhook"
+          service_type: "NodePort"
+          is_enabled: true
+        status_code: [200, 201, 400]
+      register: _activation
+      when: _eda_proj.json.results | length > 0
+
+    - name: "Setup complete summary"
+      ansible.builtin.debug:
+        msg:
+          - "Job Template: EDA-Sample-Webhook-Handler"
+          - "EDA Project: EDA-Samples-EDA-Project (ID: {{ _eda_proj.json.results[0].id | default('?') }})"
+          - "To test:"
+          - "  ansible-playbook samples/get_webhook_url.yml"
+          - "  curl -X POST <WEBHOOK_URL> -H 'Content-Type: application/json'"
+          - "       -d '{\"action\":\"deploy\",\"target\":\"webserver\",\"version\":\"1.0\"}'"

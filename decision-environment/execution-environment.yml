@@ -1,0 +1,31 @@
+---
+# execution-environment.yml — Used with ansible-builder to generate the Containerfile
+# This is an ALTERNATIVE to using the Containerfile directly.
+# Use whichever approach your team prefers.
+#
+# Build with ansible-builder:
+#   ansible-builder build -t eda-community-de:latest --container-runtime podman
+#
+# Note: type: DecisionEnvironment requires ansible-builder >= 3.1
+
+version: 3
+
+build_arg_defaults:
+  ANSIBLE_GALAXY_SERVER_LIST: "automation_hub"
+
+images:
+  base_image:
+    name: registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:latest
+
+dependencies:
+  galaxy: requirements.yml
+  python: requirements.txt
+  system: bindep.txt
+
+additional_build_steps:
+  prepend_galaxy:
+    - ENV ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_AUTH_URL=https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token
+    - ENV ANSIBLE_GALAXY_SERVER_AUTOMATION_HUB_TOKEN=""
+  append_final:
+    - RUN ansible-galaxy collection list
+    - RUN ansible-rulebook --version

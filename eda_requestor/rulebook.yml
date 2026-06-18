@@ -1,0 +1,145 @@
+---
+# EDA Sample: Requester-Response Pattern
+#
+# Problem: The entity that POSTs to EDA's webhook wants a response — but HTTP
+# webhooks are fire-and-forget. How does EDA send a result back to the caller?
+#
+# Solution: Structured callback pattern
+#   1. Requester POSTs event with a callback_url in the payload
+#   2. EDA stores the callback_url as a fact
+#   3. EDA triggers a job template (the "work")
+#   4. The playbook, when done, POSTs the result back to callback_url
+#
+# This is the standard pattern for synchronous-feeling automation over
+# asynchronous event-driven infrastructure.
+#
+# Payload schema:
+#   {
+#     "request_id":    "unique-uuid-1234",      ← Correlation ID
+#     "callback_url":  "https://caller.example.com/webhook/eda-result",
+#     "action":        "provision | check | remediate",
+#     "resource":      "vm01 / db-cluster-3 / etc.",
+#     "parameters":    { ...action-specific... },
+#     "requestor":     "ops-team@example.com",
+#     "timeout_secs":  300                      ← How long caller will wait
+#   }
+#
+# Response POSTed back to callback_url:
+#   {
+#     "request_id":  "unique-uuid-1234",
+#     "status":      "success | failure | timeout",
+#     "result":      { ...action output... },
+#     "message":     "Human readable summary",
+#     "completed_at": "ISO8601 timestamp"
+#   }
+
+- name: "EDA Requester-Response Rulebook"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    aap_organization: "Default"
+
+  rules:
+    # ── Rule 1: Validate incoming request ───────────────────────────────────
+    # Store correlation data as facts for use in later rules
+    - name: "Accept and register incoming request"
+      condition: >
+        event.payload.request_id is defined and
+        event.payload.callback_url is defined and
+        event.payload.action is defined
+      action:
+        set_fact:
+          active_request_id: "{{ event.payload.request_id }}"
+          active_callback_url: "{{ event.payload.callback_url }}"
+          active_requestor: "{{ event.payload.requestor | default('unknown') }}"
+
+    # ── Rule 2: Provision action ─────────────────────────────────────────────
+    - name: "Handle provision request"
+      condition: >
+        event.payload.action == "provision" and
+        event.payload.callback_url is defined
+      action:
+        run_job_template:
+          name: "EDA-Requestor-Handler"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              req_action: "provision"
+              req_request_id: "{{ event.payload.request_id }}"
+              req_callback_url: "{{ event.payload.callback_url }}"
+              req_resource: "{{ event.payload.resource | default('') }}"
+              req_parameters: "{{ event.payload.parameters | default({}) | to_json }}"
+              req_requestor: "{{ event.payload.requestor | default('unknown') }}"
+              req_timeout_secs: "{{ event.payload.timeout_secs | default(300) }}"
+
+    # ── Rule 3: Check / status action ────────────────────────────────────────
+    - name: "Handle status check request"
+      condition: >
+        event.payload.action == "check" and
+        event.payload.callback_url is defined
+      action:
+        run_job_template:
+          name: "EDA-Requestor-Handler"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              req_action: "check"
+              req_request_id: "{{ event.payload.request_id }}"
+              req_callback_url: "{{ event.payload.callback_url }}"
+              req_resource: "{{ event.payload.resource | default('') }}"
+              req_parameters: "{{ event.payload.parameters | default({}) | to_json }}"
+              req_requestor: "{{ event.payload.requestor | default('unknown') }}"
+
+    # ── Rule 4: Remediate action ─────────────────────────────────────────────
+    - name: "Handle remediation request"
+      condition: >
+        event.payload.action == "remediate" and
+        event.payload.callback_url is defined
+      action:
+        run_job_template:
+          name: "EDA-Requestor-Handler"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              req_action: "remediate"
+              req_request_id: "{{ event.payload.request_id }}"
+              req_callback_url: "{{ event.payload.callback_url }}"
+              req_resource: "{{ event.payload.resource | default('') }}"
+              req_parameters: "{{ event.payload.parameters | default({}) | to_json }}"
+              req_requestor: "{{ event.payload.requestor | default('unknown') }}"
+
+    # ── Rule 5: Reject requests missing callback_url ─────────────────────────
+    - name: "Reject requests without callback URL"
+      condition: >
+        event.payload.request_id is defined and
+        event.payload.callback_url is not defined
+      action:
+        debug:
+          msg: >-
+            REJECTED request {{ event.payload.request_id }}:
+            No callback_url provided. This rulebook requires a callback_url
+            for async response delivery.
+
+    # ── Rule 6: Unknown actions ───────────────────────────────────────────────
+    - name: "Handle unknown actions with error callback"
+      condition: >
+        event.payload.action is defined and
+        event.payload.callback_url is defined and
+        event.payload.action not in ["provision", "check", "remediate"]
+      action:
+        run_job_template:
+          name: "EDA-Requestor-Handler"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              req_action: "error"
+              req_request_id: "{{ event.payload.request_id | default('unknown') }}"
+              req_callback_url: "{{ event.payload.callback_url }}"
+              req_resource: "{{ event.payload.resource | default('') }}"
+              req_parameters: "{}"
+              req_requestor: "{{ event.payload.requestor | default('unknown') }}"
+              req_error_message: "Unknown action: {{ event.payload.action }}"

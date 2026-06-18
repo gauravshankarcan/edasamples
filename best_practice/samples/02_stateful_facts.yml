@@ -1,0 +1,62 @@
+---
+# SAMPLE 02: Stateful facts — counting events and escalating
+# Purpose: Demonstrates set_fact for persistent state across multiple events.
+#
+# Scenario: Count warning events. After 3 warnings, escalate.
+# This is the EDA equivalent of a playbook using "register" to track state,
+# but facts here persist across MULTIPLE event arrivals (not just one play).
+#
+# How to test (run three times):
+#   curl -X POST http://localhost:5000 -d '{"level":"warning","message":"Disk 80%"}'
+#   curl -X POST http://localhost:5000 -d '{"level":"warning","message":"Disk 85%"}'
+#   curl -X POST http://localhost:5000 -d '{"level":"warning","message":"Disk 90%"}'
+#   # Third event should trigger escalation rule
+
+- name: "Stateful Alert Counting Demo"
+  hosts: localhost
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    # Rule 1: Count each warning — uses set_fact to persist counter
+    # NOTE: facts.warning_count persists across ALL events until activation restarts
+    - name: "Increment warning counter"
+      condition: event.payload.level == "warning"
+      action:
+        set_fact:
+          warning_count: "{{ (facts.warning_count | default(0) | int) + 1 }}"
+          last_warning_msg: "{{ event.payload.message }}"
+
+    # Rule 2: Escalate when counter reaches 3
+    # NOTE: This evaluates on EVERY event — facts.warning_count is always current
+    - name: "Escalate after 3 warnings"
+      condition: facts.warning_count is defined and facts.warning_count >= 3
+      action:
+        debug:
+          msg: >-
+            ESCALATING: {{ facts.warning_count }} warnings received.
+            Last: {{ facts.last_warning_msg }}
+        # In production, replace debug with:
+        # run_job_template:
+        #   name: "EDA-Escalate-Alert"
+        #   organization: "Default"
+
+    # Rule 3: Critical events bypass the counter — immediate action
+    - name: "Immediate escalation for critical events"
+      condition: event.payload.level == "critical"
+      action:
+        debug:
+          msg: "CRITICAL: {{ event.payload.message }} — immediate escalation"
+        # run_job_template:
+        #   name: "EDA-Critical-Incident"
+        #   organization: "Default"
+
+    # Rule 4: Reset counter on clear events
+    - name: "Reset counter on clear"
+      condition: event.payload.level == "clear"
+      action:
+        set_fact:
+          warning_count: 0
+          last_warning_msg: ""

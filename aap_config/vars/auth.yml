@@ -1,0 +1,13 @@
+---
+# AAP connection settings used by all infra.aap_configuration roles.
+# Sensitive values come from vault.yml (see vault-example.yml).
+
+aap_hostname: "https://aap-aap.apps-crc.testing"
+aap_username: "admin"
+aap_password: "{{ vault_aap_password }}"
+aap_validate_certs: false
+
+# AWS credentials (used by controller_credentials and AWS inventory)
+aws_access_key_id: "{{ vault_aws_access_key_id }}"
+aws_secret_access_key: "{{ vault_aws_secret_access_key }}"
+aws_account_id: "{{ vault_aws_account_id }}"

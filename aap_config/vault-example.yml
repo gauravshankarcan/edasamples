@@ -1,0 +1,13 @@
+---
+# Example vault file — copy to vault.yml and encrypt:
+#   ansible-vault encrypt aap_config/vault.yml
+#
+# Reference in the playbook with:
+#   ansible-playbook aap_config/configure_aap.yml \
+#     -e @aap_config/vault.yml --ask-vault-pass
+
+vault_aap_password: "uCrmAIFPissa1gD1KnYfqJmcI5tw4iIs"
+
+vault_aws_access_key_id: "AKIAIOSFODNN7EXAMPLE"
+vault_aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+vault_aws_account_id: "123456789012"

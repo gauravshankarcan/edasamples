@@ -1,0 +1,88 @@
+---
+# Playbook: EDA Limited Job — runs only on hosts specified by EDA 'limit'
+# Called by: EDA-Limit-OS-Patching job template
+#
+# The 'limit' from EDA restricts WHICH hosts this runs on.
+# This playbook handles multiple actions based on param_action.
+
+- name: "EDA Limited Host Action"
+  hosts: all           # AAP/EDA 'limit' controls which hosts are actually targeted
+  gather_facts: true   # We need facts to make OS-appropriate decisions
+
+  tasks:
+    - name: "Show target host information"
+      ansible.builtin.debug:
+        msg:
+          - "════════════════════════════════════════"
+          - "  EDA Targeted Action"
+          - "  Host:       {{ inventory_hostname }}"
+          - "  Action:     {{ param_action }}"
+          - "  Requestor:  {{ param_requestor }}"
+          - "  Change ID:  {{ param_change_id }}"
+          - "  OS:         {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "  Limit was:  {{ eda_target_hosts }}"
+          - "════════════════════════════════════════"
+
+    # ── OS Patching ──────────────────────────────────────────────────────────
+    - name: "Apply OS patches (dry-run mode)"
+      ansible.builtin.debug:
+        msg:
+          - "PATCHING {{ inventory_hostname }}"
+          - "Would run: yum update -y (RHEL) or apt upgrade -y (Debian)"
+          - "Change ID: {{ param_change_id }}"
+          - "(Dry-run mode — enable actual patching in production)"
+      when: param_action == "patching"
+
+    - name: "Simulate patch check"
+      ansible.builtin.command: echo "Checking available updates..."
+      register: patch_check
+      changed_when: false
+      when: param_action == "patching"
+
+    # ── Compliance Check ─────────────────────────────────────────────────────
+    - name: "Run compliance checks"
+      ansible.builtin.debug:
+        msg:
+          - "COMPLIANCE CHECK on {{ inventory_hostname }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "CPUs: {{ ansible_processor_vcpus }}"
+          - "Memory: {{ ansible_memtotal_mb }} MB"
+      when: param_action == "compliance_check"
+
+    - name: "Check disk usage"
+      ansible.builtin.command: df -h /
+      register: disk_info
+      changed_when: false
+      when: param_action == "compliance_check"
+
+    - name: "Report disk usage"
+      ansible.builtin.debug:
+        msg: "Disk: {{ disk_info.stdout_lines }}"
+      when: param_action == "compliance_check"
+
+    # ── Service Restart ──────────────────────────────────────────────────────
+    - name: "Restart specified service"
+      ansible.builtin.debug:
+        msg:
+          - "RESTART {{ param_service_name }} on {{ inventory_hostname }}"
+          - "(In production: systemctl restart {{ param_service_name }})"
+      when:
+        - param_action == "restart_service"
+        - param_service_name | length > 0
+
+    - name: "Fail if no service name for restart"
+      ansible.builtin.fail:
+        msg: "param_service_name is required for restart_service action"
+      when:
+        - param_action == "restart_service"
+        - param_service_name | length == 0
+
+    # ── Result Summary ───────────────────────────────────────────────────────
+    - name: "Action result summary"
+      ansible.builtin.debug:
+        msg: >-
+          ✓ {{ param_action | upper }} completed on {{ inventory_hostname }}
+          ({{ ansible_distribution }} {{ ansible_distribution_version }})
+          Requestor: {{ param_requestor }}
+          {{ 'Change: ' + param_change_id if param_change_id else '' }}

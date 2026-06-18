@@ -1,0 +1,127 @@
+---
+# ── AAP Controller Configuration ─────────────────────────────────────────────
+# Consumed by infra.aap_configuration.dispatch (controller roles section).
+# Variable names exactly match what the dispatch role expects.
+
+# ── Organizations ─────────────────────────────────────────────────────────────
+aap_organizations:
+  - name: Default
+    description: "Default organization for EDA samples"
+
+# ── Credentials ──────────────────────────────────────────────────────────────
+controller_credentials:
+  - name: EDA-AWS-Credential
+    description: "AWS credentials for EC2 dynamic inventory and eda_param_limit_jobs sample"
+    organization: Default
+    credential_type: Amazon Web Services
+    inputs:
+      username: "{{ aws_access_key_id }}"
+      password: "{{ aws_secret_access_key }}"
+
+# ── Inventories ───────────────────────────────────────────────────────────────
+controller_inventories:
+  - name: EDA-Sample-Inventory
+    description: "Static localhost inventory for EDA webhook-triggered playbooks"
+    organization: Default
+
+  - name: EDA-AWS-Dynamic-Inventory
+    description: "AWS EC2 dynamic inventory for eda_param_limit_jobs — targets tagged instances"
+    organization: Default
+
+# ── Hosts (in static inventory) ───────────────────────────────────────────────
+controller_hosts:
+  - name: localhost
+    inventory: EDA-Sample-Inventory
+    variables:
+      ansible_connection: local
+      ansible_python_interpreter: "{{ '{{' }} ansible_playbook_python {{ '}}' }}"
+
+# ── Inventory Sources (EC2 dynamic inventory) ─────────────────────────────────
+controller_inventory_sources:
+  - name: EDA-AWS-EC2-Source
+    description: "AWS EC2 dynamic inventory source — discovers instances tagged Owner=eda-samples"
+    inventory: EDA-AWS-Dynamic-Inventory
+    source: ec2
+    credential: EDA-AWS-Credential
+    overwrite: true
+    update_on_launch: true
+    source_vars:
+      regions:
+        - us-east-1
+      filters:
+        "tag:Owner": "eda-samples"
+      keyed_groups:
+        - key: tags.Group
+          prefix: ""
+          separator: ""
+        - key: tags.Environment
+          prefix: env_
+        - key: tags.Role
+          prefix: role_
+      hostnames:
+        - tag:Name
+        - private-ip-address
+
+# ── Projects ─────────────────────────────────────────────────────────────────
+controller_projects:
+  - name: EDA-Samples-Project
+    description: "EDA samples — webhook, parameterized, limit jobs, requestor, regex"
+    organization: Default
+    scm_type: git
+    scm_url: "{{ git_repo_url }}"
+    scm_branch: main
+    update_on_launch: false
+    wait: true
+
+# ── Job Templates ─────────────────────────────────────────────────────────────
+controller_templates:
+
+  - name: EDA-Sample-Webhook-Handler
+    description: "Basic webhook sample — logs event fields and writes audit record"
+    job_type: run
+    organization: Default
+    inventory: EDA-Sample-Inventory
+    project: EDA-Samples-Project
+    playbook: "samples/playbooks/handle_event.yml"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+
+  - name: EDA-Param-Deploy-Service
+    description: "Parameterized deploy/rollback/scale/restart triggered by EDA webhook"
+    job_type: run
+    organization: Default
+    inventory: EDA-Sample-Inventory
+    project: EDA-Samples-Project
+    playbook: "eda_param_samples/playbooks/parameterized_deploy.yml"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+
+  - name: EDA-Limit-OS-Patching
+    description: "OS patching / compliance check — runs only on hosts specified by EDA limit"
+    job_type: run
+    organization: Default
+    inventory: EDA-AWS-Dynamic-Inventory
+    project: EDA-Samples-Project
+    playbook: "eda_param_limit_jobs/playbooks/limited_action.yml"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+
+  - name: EDA-Requestor-Handler
+    description: "Processes incoming request and POSTs result back to callback_url"
+    job_type: run
+    organization: Default
+    inventory: EDA-Sample-Inventory
+    project: EDA-Samples-Project
+    playbook: "eda_requestor/playbooks/handle_with_callback.yml"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+
+  - name: EDA-Regex-Demo
+    description: "CI/CD image tag router — is match/search in conditions, regex_replace in playbook"
+    job_type: run
+    organization: Default
+    inventory: EDA-Sample-Inventory
+    project: EDA-Samples-Project
+    playbook: "eda_regex_samples/playbooks/process_with_regex.yml"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true

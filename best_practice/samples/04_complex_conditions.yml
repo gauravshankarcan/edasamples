@@ -1,0 +1,105 @@
+---
+# SAMPLE 04: Complex conditions and condition types
+# Purpose: Demonstrates ALL/ANY multi-condition syntax and time-window matching.
+#
+# Condition types:
+#   Simple:  condition: event.field == "value"
+#   All:     condition:
+#              all:
+#                - event.field1 == "a"
+#                - event.field2 == "b"
+#   Any:     condition:
+#              any:
+#                - event.field1 == "a"
+#                - event.field1 == "b"
+#   Not:     condition:
+#              not:
+#                event.field == "a"
+#   Nested:  Combine all/any/not
+
+- name: "Complex Conditions Demo"
+  hosts: localhost
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    allowed_environments:
+      - production
+      - staging
+    critical_services:
+      - database
+      - api-gateway
+      - auth-service
+
+  rules:
+    # ALL conditions must match (AND logic)
+    - name: "Production critical service failure"
+      condition:
+        all:
+          - event.payload.environment == "production"
+          - event.payload.severity == "critical"
+          - event.payload.service is defined
+      action:
+        debug:
+          msg: "PROD CRITICAL: {{ event.payload.service }} — {{ event.payload.message }}"
+
+    # ANY condition matches (OR logic)
+    - name: "Any emergency or critical event"
+      condition:
+        any:
+          - event.payload.severity == "emergency"
+          - event.payload.priority == "P1"
+          - event.payload.escalate == true
+      action:
+        debug:
+          msg: "High-priority event: {{ event.payload }}"
+
+    # NOT condition
+    - name: "Non-production events"
+      condition:
+        not:
+          event.payload.environment == "production"
+      action:
+        debug:
+          msg: "Non-prod event in {{ event.payload.environment | default('unknown') }}"
+
+    # Nested: all of [any of [A, B], C]
+    - name: "Deployment in prod or staging, with approval"
+      condition:
+        all:
+          - any:
+              - event.payload.environment == "production"
+              - event.payload.environment == "staging"
+          - event.payload.approved == true
+          - event.payload.action == "deploy"
+      action:
+        debug:
+          msg: "Approved deployment to {{ event.payload.environment }}"
+
+    # Using 'is defined' and 'is not defined'
+    - name: "Events missing required fields"
+      condition:
+        any:
+          - event.payload.service is not defined
+          - event.payload.environment is not defined
+      action:
+        debug:
+          msg: "WARNING: Event missing required fields: {{ event.payload }}"
+
+    # Regex matching
+    - name: "Error message contains stack trace"
+      condition: event.payload.message is search("Traceback|NullPointerException|segfault")
+      action:
+        debug:
+          msg: "Stack trace detected — auto-creating incident"
+
+    # Numeric comparisons
+    - name: "CPU over threshold"
+      condition: >
+        event.payload.metric == "cpu_percent" and
+        event.payload.value | float > 85.0
+      action:
+        debug:
+          msg: "CPU at {{ event.payload.value }}% on {{ event.payload.host }}"

@@ -1,0 +1,19 @@
+---
+# Collections required to run configure_aap.yml
+# Install with: ansible-galaxy collection install -r aap_config/requirements.yml
+#
+# NOTE on ansible.controller and ansible.platform:
+#   These are Red Hat certified collections available only from
+#   console.redhat.com/ansible/automation-hub (RH subscription required).
+#   On Galaxy/community environments substitute with:
+#     awx.awx  (identical modules, upstream community version)
+#   and create a compatibility symlink so infra.aap_configuration resolves correctly:
+#     COLL=$HOME/.ansible/collections/ansible_collections
+#     mkdir -p $COLL/ansible
+#     AWX=$(python3 -c "import importlib.util,os; s=importlib.util.find_spec('ansible_collections.awx.awx'); print(os.path.dirname(os.path.dirname(s.submodule_search_locations[0])))")
+#     ln -sfn $AWX/awx/awx $COLL/ansible/controller
+collections:
+  - name: infra.aap_configuration
+  - name: awx.awx           # community equivalent of ansible.controller
+  - name: ansible.eda       # available on Galaxy
+  # ansible.platform (gateway) — only available on Automation Hub; excluded from playbook

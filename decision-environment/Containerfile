@@ -1,0 +1,44 @@
+# Decision Environment — EDA with community.aws collection
+#
+# Build:
+#   podman build -t eda-community-de:latest .
+#   podman tag eda-community-de:latest <registry>/eda-community-de:latest
+#   podman push <registry>/eda-community-de:latest
+#
+# Or use build.sh for a fully automated build + push to OCP imagestream.
+#
+# Base image:
+#   registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:latest
+#   Contains: ansible-rulebook, ansible.eda, ansible-core
+
+ARG BASE_IMAGE=registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:latest
+
+FROM ${BASE_IMAGE}
+
+# Switch to root for package installation
+USER root
+
+# Install Python dependencies for community.aws and event source plugins
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && \
+    rm -f /tmp/requirements.txt
+
+# Install Ansible collections
+COPY requirements.yml /tmp/requirements.yml
+RUN ansible-galaxy collection install -r /tmp/requirements.yml \
+    --collections-path /usr/share/ansible/collections && \
+    rm -f /tmp/requirements.yml
+
+# Verify ansible-rulebook is present (it should be in base image)
+RUN ansible-rulebook --version
+
+# Verify community.aws installed
+RUN ansible-doc -t module community.aws.ec2_instance --list 2>/dev/null | head -1 || \
+    ansible-galaxy collection list community.aws
+
+# Switch back to non-root
+USER 1001
+
+LABEL maintainer="EDA Samples"
+LABEL description="Decision Environment with community.aws for EDA"
+LABEL version="1.0"

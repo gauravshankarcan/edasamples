@@ -1,0 +1,176 @@
+---
+# setup_aap.yml — Creates AAP objects for the requestor-response callback pattern.
+#
+# Usage:
+#   ansible-playbook eda_requestor/setup_aap.yml \
+#     -e git_repo_url=https://git.example.com/org/edasamples
+#
+# Required:
+#   git_repo_url — SCM URL for the project
+#
+# Environment:
+#   AAP_BASE, AAP_TOKEN, AAP_PASS
+
+- name: "EDA Requestor Pattern Setup"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aap_base: "{{ lookup('env', 'AAP_BASE') | default('https://aap-aap.apps-crc.testing', true) }}"
+    aap_token: "{{ lookup('env', 'AAP_TOKEN') | default('', true) }}"
+    aap_pass: "{{ lookup('env', 'AAP_PASS') }}"
+    aap_user: "admin"
+    eda_api: "{{ aap_base }}/api/eda/v1"
+
+  pre_tasks:
+    - name: "Verify git_repo_url is set"
+      ansible.builtin.assert:
+        that: git_repo_url is defined and git_repo_url | length > 0
+        fail_msg: "git_repo_url must be provided: -e git_repo_url=https://git.example.com/org/edasamples"
+
+  tasks:
+    - name: "Get or create EDA-Sample-Inventory"
+      awx.awx.inventory:
+        name: "EDA-Sample-Inventory"
+        description: "Localhost"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      register: _inv
+
+    - name: "Add localhost host to inventory"
+      awx.awx.host:
+        name: localhost
+        inventory: EDA-Sample-Inventory
+        state: present
+        variables:
+          ansible_connection: local
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      when: _inv.changed
+      ignore_errors: true
+
+    - name: "Get or create EDA-Samples-Project"
+      awx.awx.project:
+        name: "EDA-Samples-Project"
+        scm_type: git
+        scm_url: "{{ git_repo_url }}"
+        scm_branch: main
+        scm_update_on_launch: true
+        organization: Default
+        wait: true
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+
+    - name: "Create job template EDA-Requestor-Handler"
+      awx.awx.job_template:
+        name: "EDA-Requestor-Handler"
+        description: "Handles EDA requests and sends callback response"
+        job_type: run
+        inventory: EDA-Sample-Inventory
+        project: EDA-Samples-Project
+        playbook: "eda_requestor/playbooks/handle_with_callback.yml"
+        ask_variables_on_launch: true
+        extra_vars:
+          req_action: "unknown"
+          req_request_id: ""
+          req_callback_url: ""
+          req_resource: ""
+          req_requestor: "eda-automation"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      register: _jt
+
+    - name: "Get EDA project"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/?name=EDA-Samples-EDA-Project"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _eda_proj_check
+
+    - name: "Create EDA project if missing"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "EDA-Samples-EDA-Project"
+          url: "{{ git_repo_url }}"
+          organization_id: 1
+        status_code: [200, 201]
+      when: _eda_proj_check.json.results | length == 0
+      ignore_errors: true
+
+    - name: "Wait for EDA project sync"
+      ansible.builtin.pause:
+        seconds: 15
+      when: _eda_proj_check.json.results | length == 0
+
+    - name: "Re-fetch EDA project ID"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/?name=EDA-Samples-EDA-Project"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _eda_proj
+
+    - name: "Get Decision Environment ID"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/decision-environments/"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _de_list
+
+    - name: "Create EDA activation for requestor pattern"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "eda-requestor-activation"
+          description: "Requester-response callback pattern"
+          decision_environment_id: "{{ _de_list.json.results[0].id }}"
+          project_id: "{{ _eda_proj.json.results[0].id }}"
+          rulebook_rulesets: "eda_requestor/rulebook.yml"
+          organization_id: 1
+          is_enabled: true
+        status_code: [200, 201, 400]
+      register: _activation
+      when:
+        - _de_list.json.results | length > 0
+        - _eda_proj.json.results | length > 0
+
+    - name: "Setup complete summary"
+      ansible.builtin.debug:
+        msg:
+          - "Job Template: EDA-Requestor-Handler"
+          - "EDA Activation: eda-requestor-activation"
+          - "Test:"
+          - "  1. Start mock callback server:"
+          - "     python3 tests/mock_callback_server.py --port 8888"
+          - "  2. Run test:"
+          - "     ansible-playbook eda_requestor/tests/test_request.yml"
+          - "       -e eda_url=<WEBHOOK_URL>"
+          - "       -e callback_url=http://$(hostname -I | cut -d' ' -f1):8888/callback"

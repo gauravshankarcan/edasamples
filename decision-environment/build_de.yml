@@ -1,0 +1,209 @@
+---
+# build_de.yml — Build Decision Environment image and push to OCP ImageStream.
+#
+# Usage:
+#   ansible-playbook decision-environment/build_de.yml
+#   ansible-playbook decision-environment/build_de.yml -e skip_push=true
+#   ansible-playbook decision-environment/build_de.yml -e image_tag=v1.2
+#
+# What this does:
+#   1. Builds the DE image using podman
+#   2. Verifies ansible-rulebook and collections are present
+#   3. Creates an OCP ImageStream in the 'aap' namespace
+#   4. Pushes to the OCP internal registry
+#   5. Registers the DE in AAP EDA Controller
+
+- name: "Build and Register EDA Decision Environment"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    image_name: "eda-community-de"
+    image_tag: "{{ tag | default('latest') }}"
+    de_base_image: "registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:latest"
+    ocp_namespace: "aap"
+    skip_push: "{{ skip | default(false) | bool }}"
+    kubeconfig_path: "{{ lookup('env', 'KUBECONFIG') | default('/tmp/kubeconfig-eda-session', true) }}"
+    aap_base: "{{ lookup('env', 'AAP_BASE') | default('https://aap-aap.apps-crc.testing', true) }}"
+    aap_pass: "{{ lookup('env', 'AAP_PASS') }}"
+    aap_user: "admin"
+    eda_api: "{{ aap_base }}/api/eda/v1"
+    de_dir: "{{ playbook_dir }}"
+
+  tasks:
+    # ── Step 1: Build image ───────────────────────────────────────────────────
+    - name: "Build DE image with podman"
+      containers.podman.podman_image:
+        name: "{{ image_name }}"
+        tag: "{{ image_tag }}"
+        path: "{{ de_dir }}"
+        build:
+          file: "Containerfile"
+          args:
+            BASE_IMAGE: "{{ de_base_image }}"
+        state: build
+        force: true
+      register: _build
+
+    # ── Step 2: Verify image ──────────────────────────────────────────────────
+    - name: "Verify ansible-rulebook version in image"
+      containers.podman.podman_container:
+        name: "de-verify-rulebook"
+        image: "{{ image_name }}:{{ image_tag }}"
+        command: ["ansible-rulebook", "--version"]
+        detach: false
+        rm: true
+        state: started
+      register: _verify_rb
+
+    - name: "Display ansible-rulebook version"
+      ansible.builtin.debug:
+        msg: "{{ _verify_rb.stdout_lines | default([]) }}"
+
+    - name: "Verify community.aws collection in image"
+      containers.podman.podman_container:
+        name: "de-verify-aws"
+        image: "{{ image_name }}:{{ image_tag }}"
+        command: ["ansible-galaxy", "collection", "list", "community.aws"]
+        detach: false
+        rm: true
+        state: started
+      register: _verify_aws
+
+    - name: "Assert community.aws is present"
+      ansible.builtin.assert:
+        that: "'community.aws' in (_verify_aws.stdout | default(''))"
+        fail_msg: "community.aws collection not found in DE image"
+        success_msg: "community.aws collection verified"
+
+    # ── Step 3 & 4: Push to OCP ImageStream ──────────────────────────────────
+    - name: "Get OCP internal registry route"
+      ansible.builtin.command:
+        cmd: >
+          oc get route default-route -n openshift-image-registry
+          --template='{{ "{{" }} .spec.host {{ "}}" }}'
+          --kubeconfig {{ kubeconfig_path }}
+      register: _registry_route
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Expose OCP internal registry route if not exposed"
+      ansible.builtin.command:
+        cmd: >
+          oc patch configs.imageregistry.operator.openshift.io/cluster
+          --type merge -p '{"spec":{"defaultRoute":true}}'
+          --kubeconfig {{ kubeconfig_path }}
+      when: _registry_route.rc != 0 or _registry_route.stdout | length == 0
+      ignore_errors: true
+
+    - name: "Re-fetch OCP registry route"
+      ansible.builtin.command:
+        cmd: >
+          oc get route default-route -n openshift-image-registry
+          --template='{{ "{{" }} .spec.host {{ "}}" }}'
+          --kubeconfig {{ kubeconfig_path }}
+      register: _ocp_registry
+      changed_when: false
+      when: not skip_push
+
+    - name: "Create OCP ImageStream"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: image.openshift.io/v1
+          kind: ImageStream
+          metadata:
+            name: "{{ image_name }}"
+            namespace: "{{ ocp_namespace }}"
+      when: not skip_push
+      ignore_errors: true
+
+    - name: "Get OCP login token"
+      ansible.builtin.command:
+        cmd: oc whoami -t --kubeconfig {{ kubeconfig_path }}
+      register: _ocp_token
+      changed_when: false
+      when: not skip_push
+
+    - name: "Login to OCP image registry"
+      containers.podman.podman_login:
+        registry: "{{ _ocp_registry.stdout }}"
+        username: "{{ lookup('pipe', 'oc whoami --kubeconfig ' + kubeconfig_path) }}"
+        password: "{{ _ocp_token.stdout }}"
+        tlsverify: false
+      when:
+        - not skip_push
+        - _ocp_token.stdout | length > 0
+
+    - name: "Tag image for OCP registry"
+      containers.podman.podman_tag:
+        image: "{{ image_name }}:{{ image_tag }}"
+        target_names:
+          - "{{ _ocp_registry.stdout }}/{{ ocp_namespace }}/{{ image_name }}:{{ image_tag }}"
+      when: not skip_push
+
+    - name: "Push image to OCP ImageStream"
+      containers.podman.podman_image:
+        name: "{{ _ocp_registry.stdout }}/{{ ocp_namespace }}/{{ image_name }}:{{ image_tag }}"
+        push: true
+        push_args:
+          dest: "{{ _ocp_registry.stdout }}/{{ ocp_namespace }}/{{ image_name }}:{{ image_tag }}"
+          tlsverify: false
+      when: not skip_push
+      register: _push
+
+    - name: "Set internal registry reference"
+      ansible.builtin.set_fact:
+        internal_image_tag: >-
+          {{
+            'image-registry.openshift-image-registry.svc:5000/' + ocp_namespace + '/' + image_name + ':' + image_tag
+            if not skip_push
+            else image_name + ':' + image_tag
+          }}
+
+    # ── Step 5: Register in AAP EDA Controller ────────────────────────────────
+    - name: "Check for existing EDA-Community-DE"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/decision-environments/?name=EDA-Community-DE"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _de_check
+
+    - name: "Register Decision Environment in AAP EDA"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/decision-environments/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "EDA-Community-DE"
+          description: "Decision Environment with community.aws collection"
+          image_url: "{{ internal_image_tag }}"
+          organization_id: 1
+        status_code: [200, 201]
+      register: _de_create
+      when: _de_check.json.results | length == 0
+
+    - name: "Set DE ID"
+      ansible.builtin.set_fact:
+        de_id: >-
+          {{
+            _de_check.json.results[0].id
+            if _de_check.json.results | length > 0
+            else _de_create.json.id
+          }}
+
+    - name: "Build and registration complete"
+      ansible.builtin.debug:
+        msg:
+          - "DE Name:  EDA-Community-DE"
+          - "DE ID:    {{ de_id }}"
+          - "Image:    {{ internal_image_tag }}"
+          - "Use this DE in rulebook activations that need community.aws"

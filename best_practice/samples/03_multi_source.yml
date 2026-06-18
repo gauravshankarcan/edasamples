@@ -1,0 +1,50 @@
+---
+# SAMPLE 03: Multiple sources in one ruleset
+# Purpose: Shows that a ruleset can listen to multiple event sources simultaneously.
+# All sources feed into the SAME rules list.
+#
+# This is like having a playbook that gathers facts from multiple inventories
+# — but here, events arrive from multiple systems and are all processed by the
+# same set of rules.
+#
+# Sources used here:
+#   1. Webhook (port 5000) — for manual/CI/CD triggers
+#   2. Webhook (port 5001) — simulating a second system (e.g., monitoring)
+#
+# In production you might use: webhook + kafka, webhook + aws_sqs, etc.
+
+- name: "Multi-Source Demo"
+  hosts: localhost
+  sources:
+    # Source 1: Application events from CI/CD system
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+      filters:
+        - ansible.eda.dashes_to_underscores:  # Normalise header keys
+
+    # Source 2: Infrastructure alerts from monitoring system
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5001
+
+  rules:
+    # Events from either source are matched by the same rules.
+    # Use event.meta to distinguish source if needed.
+    - name: "Handle deployment trigger"
+      condition: event.payload.type == "deployment"
+      action:
+        debug:
+          msg: "Deployment event on port {{ event.meta.endpoint }} — version {{ event.payload.version }}"
+
+    - name: "Handle infrastructure alert"
+      condition: event.payload.type == "alert"
+      action:
+        debug:
+          msg: "Alert: {{ event.payload.message }} severity={{ event.payload.severity }}"
+
+    - name: "Catch-all for unknown events"
+      condition: event.payload.type is not defined
+      action:
+        debug:
+          msg: "Unknown event type received: {{ event.payload }}"

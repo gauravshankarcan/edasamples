@@ -1,0 +1,246 @@
+---
+# setup_aap.yml — Creates AAP objects for the EDA limit jobs demo with AWS inventory.
+#
+# Usage:
+#   ansible-playbook eda_param_limit_jobs/setup_aap.yml \
+#     -e git_repo_url=https://git.example.com/org/edasamples \
+#     -e aws_access_key=AKIAIOSFODNN7EXAMPLE \
+#     -e aws_secret_key=wJalrXUtnFEMI/K7MDENG \
+#     -e aws_region=us-east-1
+#
+# Required:
+#   git_repo_url   — SCM URL for the project
+#   aws_access_key — AWS access key ID
+#   aws_secret_key — AWS secret access key
+#
+# Environment:
+#   AAP_BASE, AAP_TOKEN, AAP_PASS
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+
+- name: "EDA Limit Jobs Setup — AWS Dynamic Inventory"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aap_base: "{{ lookup('env', 'AAP_BASE') | default('https://aap-aap.apps-crc.testing', true) }}"
+    aap_token: "{{ lookup('env', 'AAP_TOKEN') | default('', true) }}"
+    aap_pass: "{{ lookup('env', 'AAP_PASS') }}"
+    aap_user: "admin"
+    aws_access_key: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+    aws_secret_key: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    aws_region: "{{ lookup('env', 'AWS_DEFAULT_REGION') | default('us-east-1', true) }}"
+    eda_api: "{{ aap_base }}/api/eda/v1"
+
+  pre_tasks:
+    - name: "Verify required variables are set"
+      ansible.builtin.assert:
+        that:
+          - git_repo_url is defined and git_repo_url | length > 0
+          - aws_access_key | length > 0
+          - aws_secret_key | length > 0
+        fail_msg: >-
+          Required variables missing.
+          Provide: git_repo_url, aws_access_key (or AWS_ACCESS_KEY_ID), aws_secret_key (or AWS_SECRET_ACCESS_KEY)
+
+  tasks:
+    # ── Step 1: AWS Credential ────────────────────────────────────────────────
+    - name: "Create AWS credential"
+      awx.awx.credential:
+        name: "EDA-AWS-Credentials"
+        description: "AWS credentials for EDA limit demo"
+        credential_type: "Amazon Web Services"
+        organization: Default
+        inputs:
+          username: "{{ aws_access_key }}"
+          password: "{{ aws_secret_key }}"
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      register: _aws_cred
+      no_log: true
+
+    # ── Step 2: EC2 Dynamic Inventory ────────────────────────────────────────
+    - name: "Create EC2 dynamic inventory"
+      awx.awx.inventory:
+        name: "EDA-AWS-Inventory"
+        description: "Dynamic EC2 inventory for EDA limit demo"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      register: _inv
+
+    - name: "Get or create EDA-Samples-Project"
+      awx.awx.project:
+        name: "EDA-Samples-Project"
+        scm_type: git
+        scm_url: "{{ git_repo_url }}"
+        scm_branch: main
+        scm_update_on_launch: true
+        organization: Default
+        wait: true
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+
+    - name: "Configure EC2 inventory source"
+      awx.awx.inventory_source:
+        name: "EDA-EC2-Source"
+        inventory: EDA-AWS-Inventory
+        source: ec2
+        credential: EDA-AWS-Credentials
+        overwrite: true
+        update_on_launch: true
+        state: present
+        source_vars:
+          regions:
+            - "{{ aws_region }}"
+          filters:
+            "tag:Owner": "eda-samples"
+            "instance-state-name": "running"
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      register: _inv_src
+
+    - name: "Trigger inventory sync"
+      awx.awx.inventory_source_update:
+        name: "EDA-EC2-Source"
+        inventory: EDA-AWS-Inventory
+        organization: Default
+        wait: false
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      ignore_errors: true
+
+    # ── Step 3: Localhost Inventory (fallback) ────────────────────────────────
+    - name: "Ensure EDA-Sample-Inventory exists"
+      awx.awx.inventory:
+        name: "EDA-Sample-Inventory"
+        description: "Localhost"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      register: _local_inv
+
+    - name: "Add localhost host to EDA-Sample-Inventory"
+      awx.awx.host:
+        name: localhost
+        inventory: EDA-Sample-Inventory
+        state: present
+        variables:
+          ansible_connection: local
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      when: _local_inv.changed
+      ignore_errors: true
+
+    # ── Step 4: Job Template ──────────────────────────────────────────────────
+    - name: "Create job template EDA-Limit-OS-Patching"
+      awx.awx.job_template:
+        name: "EDA-Limit-OS-Patching"
+        description: "EDA-triggered job with host limit support"
+        job_type: run
+        inventory: EDA-AWS-Inventory
+        project: EDA-Samples-Project
+        playbook: "eda_param_limit_jobs/playbooks/limited_action.yml"
+        ask_variables_on_launch: true
+        ask_limit_on_launch: true
+        credentials:
+          - "EDA-AWS-Credentials"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      register: _jt
+
+    # ── Step 5: EDA Activation ────────────────────────────────────────────────
+    - name: "Get EDA project"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/?name=EDA-Samples-EDA-Project"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _eda_proj_check
+
+    - name: "Create EDA project if missing"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "EDA-Samples-EDA-Project"
+          url: "{{ git_repo_url }}"
+          organization_id: 1
+        status_code: [200, 201]
+      when: _eda_proj_check.json.results | length == 0
+      ignore_errors: true
+
+    - name: "Wait for EDA project sync"
+      ansible.builtin.pause:
+        seconds: 15
+      when: _eda_proj_check.json.results | length == 0
+
+    - name: "Re-fetch EDA project ID"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/?name=EDA-Samples-EDA-Project"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _eda_proj
+
+    - name: "Get Decision Environment ID"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/decision-environments/"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _de_list
+
+    - name: "Create EDA activation for limit jobs"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "eda-limit-jobs-activation"
+          description: "Webhook with job template limit"
+          decision_environment_id: "{{ _de_list.json.results[0].id }}"
+          project_id: "{{ _eda_proj.json.results[0].id }}"
+          rulebook_rulesets: "eda_param_limit_jobs/rulebook.yml"
+          organization_id: 1
+          is_enabled: true
+        status_code: [200, 201, 400]
+      register: _activation
+      when:
+        - _de_list.json.results | length > 0
+        - _eda_proj.json.results | length > 0
+
+    - name: "Setup complete summary"
+      ansible.builtin.debug:
+        msg:
+          - "Job Template: EDA-Limit-OS-Patching"
+          - "AWS Inventory: EDA-AWS-Inventory"
+          - "EDA Activation: eda-limit-jobs-activation"
+          - "Next: Create AWS instances with:"
+          - "  ansible-playbook eda_param_limit_jobs/aws/create_test_instances.yml"

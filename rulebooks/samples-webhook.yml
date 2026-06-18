@@ -1,0 +1,39 @@
+---
+# EDA Sample: Webhook Source → Run AAP Job Template
+# Project layout note: AAP EDA requires rulebooks in 'rulebooks/' directory.
+# Source playbooks live in 'samples/playbooks/'.
+#
+# Test:
+#   curl -X POST <ACTIVATION-WEBHOOK-URL> \
+#        -H "Content-Type: application/json" \
+#        -d '{"action":"hello","target":"world","version":"1.0.0"}'
+
+- name: "Sample Webhook to Job Template"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: "Trigger playbook on any webhook event"
+      condition: event.payload is defined
+      action:
+        run_job_template:
+          name: "EDA-Sample-Webhook-Handler"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              eda_event_action: "{{ event.payload.action | default('unknown') }}"
+              eda_event_target: "{{ event.payload.target | default('all') }}"
+              eda_event_version: "{{ event.payload.version | default('') }}"
+              eda_event_raw: "{{ event.payload | string }}"
+              eda_source_host: "{{ event.meta.headers.get('host', 'unknown') }}"
+
+    - name: "Debug — log all events"
+      condition: event.payload is defined
+      action:
+        debug:
+          msg: >-
+            [EDA-Sample] action={{ event.payload.action | default('?') }}
+            target={{ event.payload.target | default('?') }}

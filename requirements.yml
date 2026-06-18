@@ -1,0 +1,12 @@
+---
+# Collection requirements for all playbooks in this repository.
+# Install with:
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: awx.awx
+  - name: infra.aap_configuration
+  - name: ansible.eda
+  - name: containers.podman
+  - name: kubernetes.core
+  - name: amazon.aws
+  - name: community.aws

@@ -1,0 +1,9 @@
+# System package dependencies for the Decision Environment
+# Used by ansible-builder for RPM installation
+
+# Git (needed for project syncing in some environments)
+git [platform:rpm]
+
+# Useful for debugging in the DE
+curl [platform:rpm]
+jq [platform:rpm]

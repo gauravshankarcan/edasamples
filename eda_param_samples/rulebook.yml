@@ -1,0 +1,138 @@
+---
+# EDA Sample: Webhook with Parameterized Extra Vars
+#
+# Demonstrates how to:
+#   1. Extract values from the webhook event payload
+#   2. Pass them as extra_vars to an AAP job template
+#   3. Use job template's ask_variables_on_launch to accept them
+#   4. Access those vars in the playbook
+#
+# Payload schema expected by this rulebook:
+#   {
+#     "action":      "deploy|rollback|restart|scale",
+#     "service":     "name of the service",
+#     "environment": "dev|staging|production",
+#     "version":     "semver string",
+#     "replicas":    integer (optional, for scale action),
+#     "requestor":   "email or username",
+#     "ticket_id":   "JIRA-1234 or similar"
+#   }
+#
+# Test:
+#   curl -X POST http://<activation-url> \
+#     -H "Content-Type: application/json" \
+#     -d '{
+#       "action": "deploy",
+#       "service": "payment-api",
+#       "environment": "staging",
+#       "version": "2.3.1",
+#       "requestor": "john.doe@example.com",
+#       "ticket_id": "JIRA-4567"
+#     }'
+
+- name: "EDA Parameterized Webhook Samples"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    # Static defaults — override at activation launch time via extra_vars if needed
+    default_environment: "staging"
+    aap_organization: "Default"
+
+  rules:
+    # ── Rule 1: Deploy action ────────────────────────────────────────────────
+    - name: "Handle deploy action"
+      condition: event.payload.action == "deploy"
+      action:
+        run_job_template:
+          name: "EDA-Param-Deploy-Service"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              # All event fields mapped to job template vars
+              param_action: "deploy"
+              param_service: "{{ event.payload.service }}"
+              param_environment: "{{ event.payload.environment | default(vars.default_environment) }}"
+              param_version: "{{ event.payload.version }}"
+              param_requestor: "{{ event.payload.requestor | default('eda-automation') }}"
+              param_ticket_id: "{{ event.payload.ticket_id | default('') }}"
+              # Pass entire payload as JSON for audit trail
+              eda_full_payload: "{{ event.payload | to_json }}"
+              eda_event_time: "{{ event.meta.received_at | default('unknown') }}"
+
+    # ── Rule 2: Rollback action ──────────────────────────────────────────────
+    - name: "Handle rollback action"
+      condition: event.payload.action == "rollback"
+      action:
+        run_job_template:
+          name: "EDA-Param-Deploy-Service"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              param_action: "rollback"
+              param_service: "{{ event.payload.service }}"
+              param_environment: "{{ event.payload.environment | default(vars.default_environment) }}"
+              param_version: "{{ event.payload.version | default('') }}"
+              param_requestor: "{{ event.payload.requestor | default('eda-automation') }}"
+              param_ticket_id: "{{ event.payload.ticket_id | default('') }}"
+              eda_full_payload: "{{ event.payload | to_json }}"
+
+    # ── Rule 3: Scale action — uses 'replicas' parameter ────────────────────
+    - name: "Handle scale action"
+      condition: >
+        event.payload.action == "scale" and
+        event.payload.replicas is defined
+      action:
+        run_job_template:
+          name: "EDA-Param-Deploy-Service"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              param_action: "scale"
+              param_service: "{{ event.payload.service }}"
+              param_environment: "{{ event.payload.environment | default(vars.default_environment) }}"
+              param_replicas: "{{ event.payload.replicas | int }}"
+              param_requestor: "{{ event.payload.requestor | default('eda-automation') }}"
+              param_ticket_id: "{{ event.payload.ticket_id | default('') }}"
+              eda_full_payload: "{{ event.payload | to_json }}"
+
+    # ── Rule 4: Restart — simple, no version needed ──────────────────────────
+    - name: "Handle restart action"
+      condition: event.payload.action == "restart"
+      action:
+        run_job_template:
+          name: "EDA-Param-Deploy-Service"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              param_action: "restart"
+              param_service: "{{ event.payload.service }}"
+              param_environment: "{{ event.payload.environment | default(vars.default_environment) }}"
+              param_requestor: "{{ event.payload.requestor | default('eda-automation') }}"
+              eda_full_payload: "{{ event.payload | to_json }}"
+
+    # ── Rule 5: Validation — reject unknown actions ──────────────────────────
+    - name: "Reject unknown actions"
+      condition: >
+        event.payload.action is defined and
+        event.payload.action not in ["deploy", "rollback", "scale", "restart"]
+      action:
+        debug:
+          msg: >-
+            REJECTED: Unknown action '{{ event.payload.action }}'.
+            Valid actions: deploy, rollback, scale, restart.
+            Requestor: {{ event.payload.requestor | default('unknown') }}
+
+    # ── Rule 6: Missing required fields ─────────────────────────────────────
+    - name: "Reject events missing required fields"
+      condition: >
+        event.payload.service is not defined or
+        event.payload.action is not defined
+      action:
+        debug:
+          msg: >-
+            REJECTED: Event missing required fields (service, action).
+            Received: {{ event.payload }}

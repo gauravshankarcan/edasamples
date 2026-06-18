@@ -1,0 +1,84 @@
+---
+# test_request.yml — End-to-end test of the requester-response pattern.
+#
+# Usage:
+#   ansible-playbook eda_requestor/tests/test_request.yml \
+#     -e eda_url=http://localhost:5000 \
+#     -e callback_url=http://<MY_IP>:8888/callback
+#
+# Variables:
+#   eda_url      — Webhook URL for the EDA activation (required)
+#   callback_url — URL where AAP will POST the response (required)
+#   req_action   — Action to request (default: check)
+#   req_resource — Resource identifier (default: test-resource-01)
+#   req_timeout  — Timeout in seconds (default: 60)
+
+- name: "EDA Requestor Pattern End-to-End Test"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    eda_url: "{{ lookup('env', 'EDA_URL') | default('http://localhost:5000', true) }}"
+    callback_url: "{{ lookup('env', 'CALLBACK_URL') | default('', true) }}"
+    req_action: "{{ action | default('check') }}"
+    req_resource: "{{ resource | default('test-resource-01') }}"
+    req_timeout: "{{ timeout | default(60) | int }}"
+    request_id: "{{ 99999999 | random | to_uuid }}"
+
+  pre_tasks:
+    - name: "Verify required variables are set"
+      ansible.builtin.assert:
+        that:
+          - eda_url | length > 0
+          - callback_url | length > 0
+        fail_msg: >-
+          Required variables missing.
+          Provide: -e eda_url=http://localhost:5000
+                   -e callback_url=http://<MY_IP>:8888/callback
+
+  tasks:
+    - name: "Display test parameters"
+      ansible.builtin.debug:
+        msg:
+          - "EDA URL:      {{ eda_url }}"
+          - "Callback URL: {{ callback_url }}"
+          - "Request ID:   {{ request_id }}"
+          - "Action:       {{ req_action }}"
+          - "Resource:     {{ req_resource }}"
+
+    - name: "Send EDA request event"
+      ansible.builtin.uri:
+        url: "{{ eda_url }}"
+        method: POST
+        body_format: json
+        body:
+          request_id: "{{ request_id }}"
+          callback_url: "{{ callback_url }}"
+          action: "{{ req_action }}"
+          resource: "{{ req_resource }}"
+          requestor: "test-playbook"
+          timeout_secs: "{{ req_timeout }}"
+        headers:
+          Content-Type: "application/json"
+        status_code: [200, 201, 202, 204]
+        validate_certs: false
+        timeout: 30
+      register: _eda_response
+      ignore_errors: true
+
+    - name: "Display EDA response"
+      ansible.builtin.debug:
+        msg: "EDA response: {{ _eda_response.json | default(_eda_response.content | default('(no response)')) }}"
+
+    - name: "Wait for AAP to process the request"
+      ansible.builtin.debug:
+        msg:
+          - "Request sent with ID: {{ request_id }}"
+          - "Check AAP for job: EDA-Requestor-Handler"
+          - "The job will POST the result to: {{ callback_url }}"
+          - "Waiting up to {{ req_timeout }} seconds for callback..."
+
+    - name: "Test complete"
+      ansible.builtin.debug:
+        msg: "Test complete. Request ID was: {{ request_id }}"
