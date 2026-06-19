@@ -1,0 +1,126 @@
+---
+# EDA Sample: Multiple-match behaviour — MULTIPLE rules fire for the same event
+#
+# In ansible-rulebook, ALL rules whose conditions match an event WILL fire.
+# There is no implicit "stop after first match" — unlike some rule engines.
+#
+# This rulebook DELIBERATELY uses OVERLAPPING conditions so that a single
+# incoming event triggers BOTH Rule 1 (Action A) AND Rule 2 (Action B).
+#
+# WHY would you want this?
+#   - Rule 1: Remediation (fix the problem)
+#   - Rule 2: Notification (alert the team)
+#   Both should fire for the same alert. You don't want remediation without
+#   notification, and vice versa.
+#
+# HOW IT DIFFERS from single-match rulebook:
+#   single-match: Conditions are mutually exclusive → only ONE rule fires.
+#   multi-match:  Conditions OVERLAP → ALL matching rules fire for same event.
+#
+# IMPORTANT NUANCE:
+#   Ansible-rulebook does NOT have a native "match_multiple_rules: true/false"
+#   toggle. Rules are ALWAYS evaluated independently. The difference is purely
+#   in how you write conditions:
+#   - Exclusive conditions → effective single-match behaviour
+#   - Overlapping conditions → effective multi-match behaviour
+#
+#   At the ACTIVATION level, `execution_strategy: parallel` (AAP 2.7) controls
+#   whether these simultaneous actions run concurrently or sequentially.
+#   See ../eda_execution_strategy/ for that demo.
+#
+# Payload schema:
+#   {
+#     "event_type": "alert | incident",
+#     "severity":   "critical | high | medium | low",
+#     "event_id":   "EVT-001",
+#     "message":    "disk 95% full",
+#     "notification_channel": "slack"
+#   }
+#
+# Test (sends ONE event, triggers TWO job templates):
+#   curl -X POST https://<activation-url> -H "Content-Type: application/json" \
+#     -d '{
+#       "event_type": "alert",
+#       "severity": "critical",
+#       "event_id": "EVT-001",
+#       "message": "disk 95% full",
+#       "notification_channel": "slack"
+#     }'
+
+- name: "EDA Multiple Match — Overlapping Conditions, Both Rules Fire"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    aap_organization: "Default"
+
+  rules:
+    # ── Rule 1: Remediation action ───────────────────────────────────────────
+    # Condition: any critical OR high severity event with a defined event_type
+    # → fires Action A (remediation job template)
+    - name: "Trigger remediation for critical/high severity"
+      condition: >
+        event.payload.event_type is defined and
+        (event.payload.severity == "critical" or event.payload.severity == "high")
+      action:
+        run_job_template:
+          name: "EDA-Match-Multiple-Action-A"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_severity: "{{ event.payload.severity }}"
+              eda_triggered_rule: "Remediation-Rule-1"
+
+    # ── Rule 2: Notification action ──────────────────────────────────────────
+    # Condition: SAME overlap — any critical OR high event
+    # → fires Action B (notification job template)
+    # BOTH Rule 1 and Rule 2 fire for the same event payload.
+    - name: "Send notification for critical/high severity"
+      condition: >
+        event.payload.event_type is defined and
+        (event.payload.severity == "critical" or event.payload.severity == "high")
+      action:
+        run_job_template:
+          name: "EDA-Match-Multiple-Action-B"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_severity: "{{ event.payload.severity }}"
+              eda_triggered_rule: "Notification-Rule-2"
+              eda_notification_channel: "{{ event.payload.notification_channel | default('slack') }}"
+
+    # ── Rule 3: Audit log — fires for ALL events ─────────────────────────────
+    # This condition overlaps with BOTH Rule 1 and Rule 2 for critical/high.
+    # For a critical event: ALL THREE rules fire.
+    - name: "Audit log for any event"
+      condition: event.payload.event_type is defined
+      action:
+        debug:
+          msg: >-
+            [AUDIT] event_id={{ event.payload.event_id | default('?') }}
+            type={{ event.payload.event_type }}
+            severity={{ event.payload.severity | default('none') }}
+
+    # ── Rule 4: Throttle repeated events ─────────────────────────────────────
+    # once_within prevents the SAME rule from firing again within 5 minutes
+    # for events from the same source. Use this on noisy alert streams.
+    - name: "Throttled high-severity handler (once per 5 minutes)"
+      condition: >
+        event.payload.event_type is defined and
+        event.payload.severity == "high"
+      throttle:
+        once_within: 5 minutes
+        group_by_attributes:
+          - event.payload.event_type
+      action:
+        debug:
+          msg: >-
+            [THROTTLED] high severity event — this rule fires at most once/5min.
+            event_id={{ event.payload.event_id | default('?') }}

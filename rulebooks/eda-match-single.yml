@@ -1,0 +1,71 @@
+---
+# EDA Rulebook (AAP-activatable): Single-match behaviour demo
+# Source: eda_match_multiple/rulebook_single_match.yml
+# Activation: eda-match-single-activation
+#
+# This version is in rulebooks/ so AAP EDA can find it.
+# The source is identical to eda_match_multiple/rulebook_single_match.yml.
+# See that file for full documentation and comments.
+#
+# Test:
+#   curl -X POST https://eda-match-single-activation.apps-crc.testing \
+#     -H "Content-Type: application/json" \
+#     -d '{"event_type":"alert","severity":"critical","event_id":"EVT-001"}'
+
+- name: "EDA Single Match — Mutually Exclusive Conditions"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    aap_organization: "Default"
+
+  rules:
+    - name: "Handle critical severity alert"
+      condition: >
+        event.payload.event_type is defined and
+        event.payload.severity == "critical"
+      action:
+        run_job_template:
+          name: "EDA-Match-Multiple-Action-A"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_severity: "{{ event.payload.severity }}"
+              eda_triggered_rule: "Handle-Critical-Severity"
+
+    - name: "Handle high severity alert"
+      condition: >
+        event.payload.event_type is defined and
+        event.payload.severity == "high"
+      action:
+        run_job_template:
+          name: "EDA-Match-Multiple-Action-A"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_severity: "{{ event.payload.severity }}"
+              eda_triggered_rule: "Handle-High-Severity"
+
+    - name: "Handle low/medium severity alerts"
+      condition: >
+        event.payload.event_type is defined and
+        (event.payload.severity == "low" or event.payload.severity == "medium")
+      action:
+        debug:
+          msg: >-
+            Low/medium severity event received ({{ event.payload.severity }}) — logging only.
+
+    - name: "Handle events with no severity field"
+      condition: >
+        event.payload.event_type is defined and
+        event.payload.severity is not defined
+      action:
+        debug:
+          msg: "Event {{ event.payload.event_id | default('?') }} has no severity — ignoring"

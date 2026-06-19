@@ -11,3 +11,11 @@ vault_aap_password: "uCrmAIFPissa1gD1KnYfqJmcI5tw4iIs"
 vault_aws_access_key_id: "AKIAIOSFODNN7EXAMPLE"
 vault_aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 vault_aws_account_id: "123456789012"
+
+# Azure Service Principal credentials
+# These are also read from env vars in auth.yml (CLIENT_ID, PASSWORD, TENANT, SUBSCRIPTION)
+# Keep vault values for non-interactive / CI runs
+vault_azure_client_id: "00000000-0000-0000-0000-000000000000"
+vault_azure_secret: "EXAMPLE~AzureServicePrincipalSecret"
+vault_azure_tenant: "mytenant.onmicrosoft.com"
+vault_azure_subscription_id: "00000000-0000-0000-0000-000000000000"

@@ -1,0 +1,38 @@
+---
+# Action A — match_multiple_rules demo
+# This playbook is triggered by BOTH the single-match and multi-match rulebooks
+# to demonstrate how many job templates were actually invoked for one event.
+
+- name: "Match-Multiple Demo: Action A"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    eda_event_type: "{{ eda_event_type | default('unknown') }}"
+    eda_event_id: "{{ eda_event_id | default('no-id') }}"
+    eda_severity: "{{ eda_severity | default('info') }}"
+    eda_triggered_rule: "{{ eda_triggered_rule | default('Action-A') }}"
+
+  tasks:
+    - name: "Log Action A execution"
+      ansible.builtin.debug:
+        msg:
+          - "════════ ACTION A FIRED ════════"
+          - "  Event type:    {{ eda_event_type }}"
+          - "  Event ID:      {{ eda_event_id }}"
+          - "  Severity:      {{ eda_severity }}"
+          - "  Triggered by:  {{ eda_triggered_rule }}"
+          - "═══════════════════════════════"
+
+    - name: "Simulate Action A work (audit log write)"
+      ansible.builtin.copy:
+        content: |
+          {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }} ACTION_A event_type={{ eda_event_type }} id={{ eda_event_id }}
+        dest: "/tmp/eda-action-a-{{ eda_event_id }}.log"
+        mode: "0644"
+      ignore_errors: true
+
+    - name: "Summary"
+      ansible.builtin.debug:
+        msg: "Action A complete for event {{ eda_event_id }} ({{ eda_event_type }})"

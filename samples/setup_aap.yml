@@ -2,16 +2,14 @@
 # setup_aap.yml — Creates all AAP Controller and EDA objects for the webhook sample.
 #
 # Usage:
-#   ansible-playbook samples/setup_aap.yml \
-#     -e git_repo_url=https://git.example.com/org/edasamples
+#   ansible-playbook samples/setup_aap.yml
 #
-# Required:
-#   git_repo_url — SCM URL for the project containing playbooks and rulebooks
-#
-# Environment:
-#   AAP_BASE  — AAP gateway URL  (default: https://aap-aap.apps-crc.testing)
-#   AAP_TOKEN — AAP Bearer token
-#   AAP_PASS  — AAP admin password
+# Environment (from ~/.bashrc_eda_session):
+#   GITHUB_URL    — Git repo URL  (required)
+#   GITHUB_TOKEN  — GitHub PAT for private repo access
+#   AAP_BASE      — AAP gateway URL  (default: https://aap-aap.apps-crc.testing)
+#   AAP_TOKEN     — AAP Bearer token
+#   AAP_PASS      — AAP admin password
 
 - name: "EDA Sample Setup — Webhook to Job Template"
   hosts: localhost
@@ -25,14 +23,33 @@
     aap_user: "admin"
     de_base_image: "registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:latest"
     eda_api: "{{ aap_base }}/api/eda/v1"
+    git_repo_url: "{{ lookup('env', 'GITHUB_URL') | default('', true) }}"
+    github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('', true) }}"
 
   pre_tasks:
     - name: "Verify git_repo_url is set"
       ansible.builtin.assert:
-        that: git_repo_url is defined and git_repo_url | length > 0
-        fail_msg: "git_repo_url must be provided: -e git_repo_url=https://git.example.com/org/edasamples"
+        that: git_repo_url | length > 0
+        fail_msg: "Set GITHUB_URL environment variable or pass -e git_repo_url=<url>"
 
   tasks:
+    # ── GitHub Source Control Credential ─────────────────────────────────────
+    - name: "Create Controller Source Control credential for private repo"
+      awx.awx.credential:
+        name: "EDA-GitHub-Credential"
+        description: "GitHub PAT for private repo clone"
+        organization: Default
+        credential_type: "Source Control"
+        inputs:
+          username: "x-token"
+          password: "{{ github_token }}"
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      no_log: true
+      when: github_token | length > 0
+
     # ── AAP Controller Objects ────────────────────────────────────────────────
     - name: "Create Controller inventory"
       awx.awx.inventory:
@@ -66,6 +83,7 @@
         scm_url: "{{ git_repo_url }}"
         scm_branch: main
         scm_update_on_launch: true
+        scm_credential: "{{ 'EDA-GitHub-Credential' if github_token | length > 0 else omit }}"
         organization: Default
         wait: true
         state: present
@@ -91,6 +109,42 @@
       register: _jt
 
     # ── EDA Objects ───────────────────────────────────────────────────────────
+    - name: "Create EDA Source Control credential for private repo"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/eda-credentials/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "EDA-GitHub-SCM-Credential"
+          description: "GitHub PAT for EDA project private repo clone"
+          credential_type_id: 1
+          organization_id: 1
+          inputs:
+            password: "{{ github_token }}"
+        status_code: [200, 201, 400]
+      register: _eda_scm_cred_create
+      no_log: true
+      when: github_token | length > 0
+
+    - name: "Get EDA Source Control credential ID"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/eda-credentials/?name=EDA-GitHub-SCM-Credential"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _eda_scm_cred
+      when: github_token | length > 0
+
+    - name: "Set EDA SCM credential ID"
+      ansible.builtin.set_fact:
+        eda_scm_cred_id: "{{ _eda_scm_cred.json.results[0].id | default(omit) }}"
+      when: github_token | length > 0 and _eda_scm_cred.json.results | default([]) | length > 0
+
     - name: "Create gateway token for EDA"
       ansible.builtin.uri:
         url: "{{ aap_base }}/api/gateway/v1/tokens/"
@@ -168,11 +222,19 @@
         force_basic_auth: true
         validate_certs: false
         body_format: json
-        body:
-          name: "EDA-Samples-EDA-Project"
-          url: "{{ git_repo_url }}"
-          description: "EDA rulebooks for samples"
-          organization_id: 1
+        body: >-
+          {{
+            {
+              'name': 'EDA-Samples-EDA-Project',
+              'url': git_repo_url,
+              'description': 'EDA rulebooks for samples',
+              'organization_id': 1
+            } | combine(
+              {'eda_credential_id': eda_scm_cred_id}
+              if (eda_scm_cred_id is defined)
+              else {}
+            )
+          }}
         status_code: [200, 201, 400]
       ignore_errors: true
 

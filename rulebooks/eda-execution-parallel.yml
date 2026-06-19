@@ -1,0 +1,39 @@
+---
+# EDA Rulebook (AAP-activatable): Parallel execution strategy demo
+# Activation: eda-execution-parallel-activation  (execution_strategy: parallel)
+# Source: eda_execution_strategy/rulebook_parallel.yml
+#
+# See eda_execution_strategy/README.md for full explanation.
+#
+# Test (two events rapid-fire — both start concurrently):
+#   curl -X POST https://eda-execution-parallel-activation.apps-crc.testing \
+#     -H "Content-Type: application/json" \
+#     -d '{"event_type":"alert","event_id":"EVT-001","sleep_seconds":10}'
+#   curl -X POST https://eda-execution-parallel-activation.apps-crc.testing \
+#     -H "Content-Type: application/json" \
+#     -d '{"event_type":"alert","event_id":"EVT-002","sleep_seconds":5}'
+
+- name: "EDA Parallel Execution Strategy Demo"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    aap_organization: "Default"
+
+  rules:
+    - name: "Process event in parallel (non-blocking)"
+      condition: event.payload.event_type is defined
+      action:
+        run_job_template:
+          name: "EDA-Execution-Strategy-Action"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_sleep_seconds: "{{ event.payload.sleep_seconds | default(10) }}"
+              eda_execution_mode: "parallel"
+              eda_requestor: "{{ event.payload.requestor | default('eda') }}"

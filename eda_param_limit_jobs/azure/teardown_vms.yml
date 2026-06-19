@@ -1,0 +1,123 @@
+---
+# Playbook: Teardown all EDA test Azure VMs
+# Usage:
+#   source ~/.bashrc_eda_session
+#   ansible-playbook eda_param_limit_jobs/azure/teardown_vms.yml
+#
+# Removes all VMs tagged Owner=eda-samples and associated resources
+# (NICs, public IPs, OS disks) from the resource group.
+
+- name: "Terminate EDA test Azure VMs"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    azure_subscription_id: "{{ lookup('env', 'SUBSCRIPTION') }}"
+    azure_client_id: "{{ lookup('env', 'CLIENT_ID') }}"
+    azure_secret: "{{ lookup('env', 'PASSWORD') }}"
+    azure_tenant: "{{ lookup('env', 'TENANT') }}"
+    azure_resource_group: "{{ lookup('env', 'RESOURCEGROUP') | default('eda-samples-rg', true) }}"
+    owner_tag: "eda-samples"
+
+    vm_names:
+      - "eda-test-web01"
+      - "eda-test-web02"
+      - "eda-test-db01"
+
+  tasks:
+    - name: "Confirm teardown"
+      ansible.builtin.pause:
+        prompt: "Press ENTER to delete {{ vm_names | length }} Azure VMs and their resources, Ctrl+C to cancel"
+
+    - name: "Delete VMs (retains NICs and IPs by default)"
+      azure.azcollection.azure_rm_virtualmachine:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item }}"
+        state: absent
+        # Remove OS disk together with the VM
+        remove_on_absent:
+          - all
+      loop: "{{ vm_names }}"
+      loop_control:
+        label: "{{ item }}"
+      ignore_errors: true
+
+    - name: "Delete NICs"
+      azure.azcollection.azure_rm_networkinterface:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item }}-nic"
+        state: absent
+      loop: "{{ vm_names }}"
+      loop_control:
+        label: "{{ item }}-nic"
+      ignore_errors: true
+
+    - name: "Delete Public IPs"
+      azure.azcollection.azure_rm_publicipaddress:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item }}-pip"
+        state: absent
+      loop: "{{ vm_names }}"
+      loop_control:
+        label: "{{ item }}-pip"
+      ignore_errors: true
+
+    - name: "Delete NSG"
+      azure.azcollection.azure_rm_securitygroup:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        name: "eda-test-nsg"
+        state: absent
+      ignore_errors: true
+
+    - name: "Delete Subnet"
+      azure.azcollection.azure_rm_subnet:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        virtual_network: "eda-test-vnet"
+        name: "eda-test-subnet"
+        state: absent
+      ignore_errors: true
+
+    - name: "Delete VNet"
+      azure.azcollection.azure_rm_virtualnetwork:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        name: "eda-test-vnet"
+        state: absent
+      ignore_errors: true
+
+    - name: "Delete SSH key pair"
+      ansible.builtin.file:
+        path: "/tmp/{{ item }}"
+        state: absent
+      loop:
+        - "eda-test-azure-key"
+        - "eda-test-azure-key.pub"
+      ignore_errors: true
+
+    - name: "Teardown summary"
+      ansible.builtin.debug:
+        msg: "Removed {{ vm_names | length }} EDA test VMs from {{ azure_resource_group }}"

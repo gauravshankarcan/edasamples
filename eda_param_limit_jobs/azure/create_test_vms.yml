@@ -1,0 +1,233 @@
+---
+# Playbook: Create Azure test VMs for EDA limit demo
+# Usage:
+#   source ~/.bashrc_eda_session
+#   ansible-playbook eda_param_limit_jobs/azure/create_test_vms.yml
+#
+# Creates 3 Azure VMs in the resource group from $RESOURCEGROUP:
+#   eda-test-web01  (group: webservers, env: staging, role: web)
+#   eda-test-web02  (group: webservers, env: staging, role: web)
+#   eda-test-db01   (group: databases, env: staging, role: database)
+#
+# After running, the dynamic inventory exposes groups:
+#   - webservers       (tag Group=webservers)
+#   - databases        (tag Group=databases)
+#   - env_staging      (tag Environment=staging)
+#   - role_web         (tag Role=web)
+#   - role_database    (tag Role=database)
+#
+# Auth: Service Principal from env vars (set by ~/.bashrc_eda_session)
+#   CLIENT_ID, PASSWORD, TENANT, SUBSCRIPTION
+
+- name: "Create EDA test Azure VMs"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    azure_subscription_id: "{{ lookup('env', 'SUBSCRIPTION') }}"
+    azure_client_id: "{{ lookup('env', 'CLIENT_ID') }}"
+    azure_secret: "{{ lookup('env', 'PASSWORD') }}"
+    azure_tenant: "{{ lookup('env', 'TENANT') }}"
+    azure_resource_group: "{{ lookup('env', 'RESOURCEGROUP') | default('eda-samples-rg', true) }}"
+    azure_location: "eastus"
+    vm_size: "Standard_B1s"
+    admin_username: "azureuser"
+    owner_tag: "eda-samples"
+
+    # RHEL 9 image from Red Hat — available in Azure Marketplace
+    vm_image:
+      offer: "RHEL"
+      publisher: "RedHat"
+      sku: "9_2"
+      version: "latest"
+
+    vms:
+      - name: "eda-test-web01"
+        group: "webservers"
+        environment: "staging"
+        role: "web"
+      - name: "eda-test-web02"
+        group: "webservers"
+        environment: "staging"
+        role: "web"
+      - name: "eda-test-db01"
+        group: "databases"
+        environment: "staging"
+        role: "database"
+
+  pre_tasks:
+    - name: "Verify required Azure environment variables are set"
+      ansible.builtin.assert:
+        that:
+          - azure_subscription_id | length > 0
+          - azure_client_id | length > 0
+          - azure_secret | length > 0
+          - azure_tenant | length > 0
+          - azure_resource_group | length > 0
+        fail_msg: >-
+          Missing Azure credentials.
+          Source ~/.bashrc_eda_session before running.
+          Required: SUBSCRIPTION, CLIENT_ID, PASSWORD, TENANT, RESOURCEGROUP
+
+  tasks:
+    - name: "Create Virtual Network"
+      azure.azcollection.azure_rm_virtualnetwork:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        name: "eda-test-vnet"
+        address_prefixes: "10.10.0.0/16"
+        tags:
+          Owner: "{{ owner_tag }}"
+      register: vnet_result
+      ignore_errors: true
+
+    - name: "Create subnet"
+      azure.azcollection.azure_rm_subnet:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        virtual_network: "eda-test-vnet"
+        name: "eda-test-subnet"
+        address_prefix: "10.10.0.0/24"
+      ignore_errors: true
+
+    - name: "Create Network Security Group"
+      azure.azcollection.azure_rm_securitygroup:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        name: "eda-test-nsg"
+        rules:
+          - name: "SSH"
+            protocol: Tcp
+            destination_port_range: 22
+            access: Allow
+            priority: 100
+            direction: Inbound
+          - name: "HTTP"
+            protocol: Tcp
+            destination_port_range: 80
+            access: Allow
+            priority: 110
+            direction: Inbound
+        tags:
+          Owner: "{{ owner_tag }}"
+      register: nsg_result
+      ignore_errors: true
+
+    - name: "Generate SSH key pair for test VMs"
+      community.crypto.openssh_keypair:
+        path: "/tmp/eda-test-azure-key"
+        type: rsa
+        size: 2048
+        force: false
+      register: ssh_key
+      ignore_errors: true
+
+    - name: "Create Public IP for each VM"
+      azure.azcollection.azure_rm_publicipaddress:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item.name }}-pip"
+        allocation_method: Static
+        sku: Standard
+        tags:
+          Owner: "{{ owner_tag }}"
+          VMName: "{{ item.name }}"
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}-pip"
+      register: pip_results
+
+    - name: "Create NIC for each VM"
+      azure.azcollection.azure_rm_networkinterface:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item.name }}-nic"
+        virtual_network: "eda-test-vnet"
+        subnet: "eda-test-subnet"
+        security_group: "eda-test-nsg"
+        ip_configurations:
+          - name: "ipconfig1"
+            public_ip_address_name: "{{ item.name }}-pip"
+            primary: true
+        tags:
+          Owner: "{{ owner_tag }}"
+          VMName: "{{ item.name }}"
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}-nic"
+      register: nic_results
+
+    - name: "Create test Azure VMs"
+      azure.azcollection.azure_rm_virtualmachine:
+        subscription_id: "{{ azure_subscription_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_secret }}"
+        tenant: "{{ azure_tenant }}"
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item.name }}"
+        vm_size: "{{ vm_size }}"
+        admin_username: "{{ admin_username }}"
+        ssh_password_enabled: false
+        ssh_public_keys:
+          - path: "/home/{{ admin_username }}/.ssh/authorized_keys"
+            key_data: "{{ ssh_key.public_key | default('ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC placeholder') }}"
+        network_interfaces: "{{ item.name }}-nic"
+        image: "{{ vm_image }}"
+        # These tags become dynamic inventory groups:
+        # tag_Group_webservers, tag_Environment_staging, etc.
+        tags:
+          Name: "{{ item.name }}"
+          Group: "{{ item.group }}"
+          Environment: "{{ item.environment }}"
+          Role: "{{ item.role }}"
+          Owner: "{{ owner_tag }}"
+        state: present
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: vm_results
+
+    - name: "Display created VMs"
+      ansible.builtin.debug:
+        msg:
+          - "VM: {{ item.item.name }}"
+          - "  Group: {{ item.item.group }}"
+          - "  Environment: {{ item.item.environment }}"
+      loop: "{{ vm_results.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: "Display EDA limit examples"
+      ansible.builtin.debug:
+        msg:
+          - "════════════════════════════════════════"
+          - "  EDA Limit Examples (Azure)"
+          - "  Use in webhook payload as target_hosts"
+          - "════════════════════════════════════════"
+          - "  Single host:     eda-test-web01"
+          - "  Multiple hosts:  eda-test-web01,eda-test-web02"
+          - "  By group:        webservers"
+          - "  By tag group:    tag_Group_webservers"
+          - "  By environment:  tag_Environment_staging"
+          - "  All test hosts:  tag_Owner_eda-samples"
+          - "  Wildcard:        eda-test-web*"
+          - "════════════════════════════════════════"
+          - "  Azure-specific limit (by tag):"
+          - "    azure_tag_key=Group, azure_tag_value=webservers"
+          - "════════════════════════════════════════"

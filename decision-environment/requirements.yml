@@ -16,6 +16,11 @@ collections:
   - name: community.aws
     version: ">=8.0.0"
 
+  # Azure modules and dynamic inventory
+  # Provides: azure.azcollection.azure_rm_virtualmachine, azure_rm inventory plugin
+  - name: azure.azcollection
+    version: ">=2.0.0"
+
   # General purpose modules useful in EDA playbooks
   - name: ansible.utils
     version: ">=2.0.0"
@@ -23,3 +28,7 @@ collections:
   # Posix / file operations
   - name: ansible.posix
     version: ">=1.0.0"
+
+  # OpenSSH keypair generation (used in azure/create_test_vms.yml)
+  - name: community.crypto
+    version: ">=2.0.0"

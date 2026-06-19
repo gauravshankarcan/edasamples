@@ -1,0 +1,155 @@
+---
+# setup_aap.yml — Creates AAP objects for the execution_strategy demo.
+#
+# Usage:
+#   source ~/.bashrc_eda_session
+#   ansible-playbook eda_execution_strategy/setup_aap.yml
+#
+# Environment (from ~/.bashrc_eda_session):
+#   GITHUB_URL, GITHUB_TOKEN, AAP_BASE, AAP_TOKEN, AAP_PASS
+
+- name: "EDA Execution Strategy Demo Setup"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aap_base: "{{ lookup('env', 'AAP_BASE') | default('https://aap-aap.apps-crc.testing', true) }}"
+    aap_token: "{{ lookup('env', 'AAP_TOKEN') | default('', true) }}"
+    aap_pass: "{{ lookup('env', 'AAP_PASS') }}"
+    aap_user: "admin"
+    eda_api: "{{ aap_base }}/api/eda/v1"
+    git_repo_url: "{{ lookup('env', 'GITHUB_URL') | default('', true) }}"
+    github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('', true) }}"
+
+  pre_tasks:
+    - name: "Verify git_repo_url is set"
+      ansible.builtin.assert:
+        that: git_repo_url | length > 0
+        fail_msg: "Set GITHUB_URL or pass -e git_repo_url=<url>"
+
+  tasks:
+    - name: "Ensure EDA-Sample-Inventory exists"
+      awx.awx.inventory:
+        name: "EDA-Sample-Inventory"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+
+    - name: "Add localhost to EDA-Sample-Inventory"
+      awx.awx.host:
+        name: localhost
+        inventory: EDA-Sample-Inventory
+        state: present
+        variables:
+          ansible_connection: local
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+      ignore_errors: true
+
+    - name: "Ensure EDA-Samples-Project exists"
+      awx.awx.project:
+        name: "EDA-Samples-Project"
+        scm_type: git
+        scm_url: "{{ git_repo_url }}"
+        scm_branch: main
+        scm_update_on_launch: true
+        scm_credential: "{{ 'EDA-GitHub-Credential' if github_token | length > 0 else omit }}"
+        organization: Default
+        wait: true
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+
+    - name: "Create EDA-Execution-Strategy-Action job template"
+      awx.awx.job_template:
+        name: "EDA-Execution-Strategy-Action"
+        description: "Long-running action for execution_strategy demo (10s sleep by default)"
+        job_type: run
+        inventory: EDA-Sample-Inventory
+        project: EDA-Samples-Project
+        playbook: "eda_execution_strategy/playbooks/slow_action.yml"
+        ask_variables_on_launch: true
+        organization: Default
+        state: present
+        controller_host: "{{ aap_base }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: false
+
+    - name: "Get EDA project ID"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/projects/?name=EDA-Samples-EDA-Project"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _eda_proj
+
+    - name: "Get Decision Environment ID"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/decision-environments/"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _de_list
+
+    - name: "Create EDA activation — sequential"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "eda-execution-sequential-activation"
+          description: "Sequential — events processed one at a time"
+          decision_environment_id: "{{ _de_list.json.results[0].id }}"
+          project_id: "{{ _eda_proj.json.results[0].id }}"
+          rulebook_rulesets: "rulebooks/eda-execution-sequential.yml"
+          organization_id: 1
+          is_enabled: true
+          execution_strategy: sequential
+          k8s_service_name: "eda-execution-sequential-activation"
+        status_code: [200, 201, 400]
+      when:
+        - _de_list.json.results | length > 0
+        - _eda_proj.json.results | length > 0
+
+    - name: "Create EDA activation — parallel"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/activations/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "eda-execution-parallel-activation"
+          description: "Parallel — events processed concurrently"
+          decision_environment_id: "{{ _de_list.json.results[0].id }}"
+          project_id: "{{ _eda_proj.json.results[0].id }}"
+          rulebook_rulesets: "rulebooks/eda-execution-parallel.yml"
+          organization_id: 1
+          is_enabled: true
+          execution_strategy: parallel
+          k8s_service_name: "eda-execution-parallel-activation"
+        status_code: [200, 201, 400]
+      when:
+        - _de_list.json.results | length > 0
+        - _eda_proj.json.results | length > 0
+
+    - name: "Setup complete"
+      ansible.builtin.debug:
+        msg:
+          - "Job template: EDA-Execution-Strategy-Action"
+          - "Activations:  eda-execution-sequential-activation (sequential)"
+          - "              eda-execution-parallel-activation (parallel)"
+          - "Test: testcases/11_exec_sequential.sh, testcases/12_exec_parallel.sh"

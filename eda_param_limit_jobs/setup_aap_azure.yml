@@ -1,16 +1,17 @@
 ---
-# setup_aap.yml — Creates AAP objects for the EDA limit jobs demo with AWS inventory.
+# setup_aap_azure.yml — Creates AAP objects for the EDA limit jobs demo with Azure inventory.
+#
+# Azure counterpart to setup_aap.yml (which configures AWS EC2 inventory).
 #
 # Usage:
-#   ansible-playbook eda_param_limit_jobs/setup_aap.yml \
-#     -e aws_access_key=AKIAIOSFODNN7EXAMPLE \
-#     -e aws_secret_key=wJalrXUtnFEMI/K7MDENG
+#   source ~/.bashrc_eda_session
+#   ansible-playbook eda_param_limit_jobs/setup_aap_azure.yml
 #
 # Environment (from ~/.bashrc_eda_session):
 #   GITHUB_URL, GITHUB_TOKEN, AAP_BASE, AAP_TOKEN, AAP_PASS
-#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+#   CLIENT_ID, PASSWORD, TENANT, SUBSCRIPTION, RESOURCEGROUP
 
-- name: "EDA Limit Jobs Setup — AWS Dynamic Inventory"
+- name: "EDA Limit Jobs Setup — Azure Dynamic Inventory"
   hosts: localhost
   connection: local
   gather_facts: false
@@ -20,9 +21,11 @@
     aap_token: "{{ lookup('env', 'AAP_TOKEN') | default('', true) }}"
     aap_pass: "{{ lookup('env', 'AAP_PASS') }}"
     aap_user: "admin"
-    aws_access_key: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
-    aws_secret_key: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
-    aws_region: "{{ lookup('env', 'AWS_DEFAULT_REGION') | default('us-east-1', true) }}"
+    azure_client_id: "{{ lookup('env', 'CLIENT_ID') }}"
+    azure_secret: "{{ lookup('env', 'PASSWORD') }}"
+    azure_tenant: "{{ lookup('env', 'TENANT') }}"
+    azure_subscription_id: "{{ lookup('env', 'SUBSCRIPTION') }}"
+    azure_resource_group: "{{ lookup('env', 'RESOURCEGROUP') | default('eda-samples-rg', true) }}"
     eda_api: "{{ aap_base }}/api/eda/v1"
     git_repo_url: "{{ lookup('env', 'GITHUB_URL') | default('', true) }}"
     github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('', true) }}"
@@ -32,11 +35,14 @@
       ansible.builtin.assert:
         that:
           - git_repo_url | length > 0
-          - aws_access_key | length > 0
-          - aws_secret_key | length > 0
+          - azure_client_id | length > 0
+          - azure_secret | length > 0
+          - azure_tenant | length > 0
+          - azure_subscription_id | length > 0
         fail_msg: >-
           Required variables missing.
-          Set GITHUB_URL (or pass -e git_repo_url=<url>), AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+          Source ~/.bashrc_eda_session before running.
+          Required: GITHUB_URL, CLIENT_ID, PASSWORD, TENANT, SUBSCRIPTION
 
   tasks:
     # ── GitHub Source Control Credential ─────────────────────────────────────
@@ -56,28 +62,32 @@
       no_log: true
       when: github_token | length > 0
 
-    # ── Step 1: AWS Credential ────────────────────────────────────────────────
-    - name: "Create AWS credential"
+    # ── Step 1: Azure Credential ──────────────────────────────────────────────
+    # AAP credential type "Microsoft Azure Resource Manager" accepts:
+    #   subscription_id, client_id, secret, tenant
+    - name: "Create Azure Resource Manager credential"
       awx.awx.credential:
-        name: "EDA-AWS-Credentials"
-        description: "AWS credentials for EDA limit demo"
-        credential_type: "Amazon Web Services"
+        name: "EDA-Azure-Credentials"
+        description: "Azure Service Principal for EDA limit demo"
+        credential_type: "Microsoft Azure Resource Manager"
         organization: Default
         inputs:
-          username: "{{ aws_access_key }}"
-          password: "{{ aws_secret_key }}"
+          subscription: "{{ azure_subscription_id }}"
+          client: "{{ azure_client_id }}"
+          secret: "{{ azure_secret }}"
+          tenant: "{{ azure_tenant }}"
         state: present
         controller_host: "{{ aap_base }}"
         controller_oauthtoken: "{{ aap_token }}"
         validate_certs: false
-      register: _aws_cred
+      register: _azure_cred
       no_log: true
 
-    # ── Step 2: EC2 Dynamic Inventory ────────────────────────────────────────
-    - name: "Create EC2 dynamic inventory"
+    # ── Step 2: Azure Dynamic Inventory ──────────────────────────────────────
+    - name: "Create Azure dynamic inventory"
       awx.awx.inventory:
-        name: "EDA-AWS-Inventory"
-        description: "Dynamic EC2 inventory for EDA limit demo"
+        name: "EDA-Azure-Inventory"
+        description: "Dynamic Azure RM inventory for EDA limit demo"
         organization: Default
         state: present
         controller_host: "{{ aap_base }}"
@@ -100,30 +110,41 @@
         controller_oauthtoken: "{{ aap_token }}"
         validate_certs: false
 
-    - name: "Configure EC2 inventory source"
+    - name: "Configure Azure RM inventory source"
       awx.awx.inventory_source:
-        name: "EDA-EC2-Source"
-        inventory: EDA-AWS-Inventory
-        source: ec2
-        credential: EDA-AWS-Credentials
+        name: "EDA-AzureRM-Source"
+        inventory: EDA-Azure-Inventory
+        # AAP inventory source type for Azure is "azure_rm"
+        source: azure_rm
+        credential: EDA-Azure-Credentials
         overwrite: true
         update_on_launch: true
         state: present
         source_vars:
-          regions:
-            - "{{ aws_region }}"
-          filters:
-            "tag:Owner": "eda-samples"
-            "instance-state-name": "running"
+          tags:
+            Owner: "eda-samples"
+          keyed_groups:
+            - key: "tags.Group | default('')"
+              prefix: ""
+              separator: ""
+            - key: "tags.Environment | default('')"
+              prefix: "env_"
+              separator: ""
+            - key: "tags.Role | default('')"
+              prefix: "role_"
+              separator: ""
+          default_host_filters:
+            - "powerstate == 'running'"
+          use_vm_name: true
         controller_host: "{{ aap_base }}"
         controller_oauthtoken: "{{ aap_token }}"
         validate_certs: false
       register: _inv_src
 
-    - name: "Trigger inventory sync"
+    - name: "Trigger Azure inventory sync"
       awx.awx.inventory_source_update:
-        name: "EDA-EC2-Source"
-        inventory: EDA-AWS-Inventory
+        name: "EDA-AzureRM-Source"
+        inventory: EDA-Azure-Inventory
         organization: Default
         wait: false
         controller_host: "{{ aap_base }}"
@@ -157,18 +178,18 @@
       ignore_errors: true
 
     # ── Step 4: Job Template ──────────────────────────────────────────────────
-    - name: "Create job template EDA-Limit-OS-Patching"
+    - name: "Create job template EDA-Azure-Limit-OS-Patching"
       awx.awx.job_template:
-        name: "EDA-Limit-OS-Patching"
-        description: "EDA-triggered job with host limit support"
+        name: "EDA-Azure-Limit-OS-Patching"
+        description: "EDA-triggered job with host limit support — Azure inventory"
         job_type: run
-        inventory: EDA-AWS-Inventory
+        inventory: EDA-Azure-Inventory
         project: EDA-Samples-Project
         playbook: "eda_param_limit_jobs/playbooks/limited_action.yml"
         ask_variables_on_launch: true
         ask_limit_on_launch: true
         credentials:
-          - "EDA-AWS-Credentials"
+          - "EDA-Azure-Credentials"
         organization: Default
         state: present
         controller_host: "{{ aap_base }}"
@@ -270,7 +291,7 @@
         validate_certs: false
       register: _de_list
 
-    - name: "Create EDA activation for limit jobs"
+    - name: "Create EDA activation for Azure limit jobs"
       ansible.builtin.uri:
         url: "{{ eda_api }}/activations/"
         method: POST
@@ -280,13 +301,14 @@
         validate_certs: false
         body_format: json
         body:
-          name: "eda-limit-jobs-activation"
-          description: "Webhook with job template limit"
+          name: "eda-azure-limit-jobs-activation"
+          description: "Webhook with Azure VM limit — targeting by VM name or tag group"
           decision_environment_id: "{{ _de_list.json.results[0].id }}"
           project_id: "{{ _eda_proj.json.results[0].id }}"
-          rulebook_rulesets: "eda_param_limit_jobs/rulebook.yml"
+          rulebook_rulesets: "rulebooks/eda-limit-jobs-azure.yml"
           organization_id: 1
           is_enabled: true
+          k8s_service_name: "eda-azure-limit-jobs-activation"
         status_code: [200, 201, 400]
       register: _activation
       when:
@@ -296,8 +318,10 @@
     - name: "Setup complete summary"
       ansible.builtin.debug:
         msg:
-          - "Job Template: EDA-Limit-OS-Patching"
-          - "AWS Inventory: EDA-AWS-Inventory"
-          - "EDA Activation: eda-limit-jobs-activation"
-          - "Next: Create AWS instances with:"
-          - "  ansible-playbook eda_param_limit_jobs/aws/create_test_instances.yml"
+          - "Job Template: EDA-Azure-Limit-OS-Patching"
+          - "Azure Inventory: EDA-Azure-Inventory"
+          - "EDA Activation: eda-azure-limit-jobs-activation"
+          - "Next: Create Azure VMs with:"
+          - "  ansible-playbook eda_param_limit_jobs/azure/create_test_vms.yml"
+          - "Teardown with:"
+          - "  ansible-playbook eda_param_limit_jobs/azure/teardown_vms.yml"

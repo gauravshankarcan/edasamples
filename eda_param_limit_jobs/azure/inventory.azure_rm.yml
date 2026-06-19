@@ -1,0 +1,87 @@
+---
+# Dynamic Azure RM Inventory for EDA limit demo
+# File must end in .azure_rm.yml or .azure_rm.yaml
+#
+# Auth: Service Principal from environment variables.
+# Export these before running ansible-playbook or aap sync:
+#   export AZURE_CLIENT_ID="$CLIENT_ID"
+#   export AZURE_SECRET="$PASSWORD"
+#   export AZURE_SUBSCRIPTION_ID="$SUBSCRIPTION"
+#   export AZURE_TENANT="$TENANT"
+#
+# Groups created from VM tags:
+#   webservers         → all VMs with tag Group=webservers
+#   databases          → all VMs with tag Group=databases
+#   env_staging        → all VMs with tag Environment=staging
+#   role_web           → all VMs with tag Role=web
+#   role_database      → all VMs with tag Role=database
+#
+# Usage with ansible-playbook:
+#   ansible-playbook -i azure/inventory.azure_rm.yml \
+#     eda_param_limit_jobs/playbooks/limited_action.yml \
+#     --limit webservers
+#
+# Usage in AAP:
+#   Add this file as a source in an AAP Inventory with type "Azure Resource Manager"
+
+plugin: azure.azcollection.azure_rm
+
+# Filter only EDA test VMs by tag
+tags:
+  Owner: "eda-samples"
+
+# State filter — only running VMs
+# (azure_rm inventory has no direct state filter; use conditional_groups below)
+
+# How to name hosts in the inventory
+# azure_rm uses the VM name by default (e.g., "eda-test-web01")
+default_host_filters:
+  - powerstate == "running"
+
+# Create groups from Azure VM tags
+keyed_groups:
+  # Groups based on the 'Group' tag (e.g., "webservers", "databases")
+  - key: tags.Group | default('')
+    prefix: ""
+    separator: ""
+
+  # Groups based on the 'Environment' tag (e.g., "env_staging")
+  - key: tags.Environment | default('')
+    prefix: "env_"
+    separator: ""
+
+  # Groups based on the 'Role' tag (e.g., "role_web")
+  - key: tags.Role | default('')
+    prefix: "role_"
+    separator: ""
+
+  # Groups by VM size
+  - key: vm_size | default('')
+    prefix: "size_"
+    separator: ""
+
+  # Groups by Azure region/location
+  - key: location | default('')
+    prefix: "region_"
+    separator: ""
+
+# Conditional static groups
+conditional_groups:
+  all_web: "'webservers' == (tags.Group | default(''))"
+  all_db: "'databases' == (tags.Group | default(''))"
+  eda_test_all: "'eda-samples' == (tags.Owner | default(''))"
+
+# Variables applied to all hosts
+hostvar_expressions:
+  ansible_host: public_ipv4_addresses[0] if public_ipv4_addresses else private_ipv4_addresses[0]
+  public_ip: public_ipv4_addresses[0] if public_ipv4_addresses else ''
+  vm_name: name
+  vm_resource_group: resource_group
+  vm_location: location
+  host_group: tags.Group | default('ungrouped')
+  host_environment: tags.Environment | default('unknown')
+  host_role: tags.Role | default('unknown')
+
+# Use VM name as hostname (same as AWS tag:Name behavior)
+# This is the default for azure.azcollection.azure_rm
+use_vm_name: true

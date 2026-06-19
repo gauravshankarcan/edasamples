@@ -1,0 +1,75 @@
+# Test Cases
+
+Each script contains a **single `curl` command** that triggers one EDA activation.
+Run any script directly after sourcing your environment:
+
+```bash
+source ~/.bashrc_eda_session
+bash testcases/01_webhook_basic.sh
+```
+
+## Prerequisites
+
+All activations must be running. Deploy everything with:
+
+```bash
+source ~/.bashrc_eda_session
+ansible-playbook setup_all_aap.yml
+```
+
+## Test Matrix
+
+| Script | Activation | What it tests |
+|--------|-----------|--------------|
+| `01_webhook_basic.sh` | sample-webhook-activation | Basic webhook → job template |
+| `02_webhook_hello.sh` | sample-webhook-activation | Alternate webhook payload |
+| `03_param_deploy.sh` | eda-param-samples-activation | Deploy action with service/version/env |
+| `04_param_rollback.sh` | eda-param-samples-activation | Rollback action |
+| `05_param_scale.sh` | eda-param-samples-activation | Scale action with replicas |
+| `06_limit_patching_single_host.sh` | eda-limit-jobs-activation | Patch single host by name |
+| `07_limit_patching_group.sh` | eda-limit-jobs-activation | Patch all hosts in a group |
+| `08_limit_compliance_check.sh` | eda-limit-jobs-activation | Compliance check by tag |
+| `09_limit_restart_service.sh` | eda-limit-jobs-activation | Restart nginx on multiple hosts |
+| `10_limit_aws_tag.sh` | eda-limit-jobs-activation | Target by AWS tag key/value |
+| `11_requestor_callback.sh` | eda-requestor-activation | Request with callback URL |
+| `12_regex_stable_tag.sh` | eda-regex-demo-activation | Semver image tag (v1.2.3) |
+| `13_regex_hotfix_tag.sh` | eda-regex-demo-activation | Hotfix image tag (routes differently) |
+| `14_azure_limit_single_vm.sh` | eda-azure-limit-jobs-activation | Patch single Azure VM by name |
+| `15_azure_limit_tag_group.sh` | eda-azure-limit-jobs-activation | Target Azure VMs by tag group |
+| `16_match_single_critical.sh` | eda-match-single-activation | Critical alert → ONE rule fires |
+| `17_match_single_high.sh` | eda-match-single-activation | High alert → ONE rule fires (different rule) |
+| `18_match_multiple_critical.sh` | eda-match-multiple-activation | Critical alert → TWO rules fire |
+| `19_exec_sequential_event1.sh` | eda-execution-sequential-activation | Sequential: first event (10s job) |
+| `20_exec_sequential_event2.sh` | eda-execution-sequential-activation | Sequential: second event (waits for first) |
+| `21_exec_parallel_event1.sh` | eda-execution-parallel-activation | Parallel: first event (10s job) |
+| `22_exec_parallel_event2.sh` | eda-execution-parallel-activation | Parallel: second event (runs concurrently) |
+
+## Running Sequential vs Parallel Demo
+
+To see the timing difference clearly:
+
+```bash
+# Sequential — send both events quickly, observe second waits
+bash testcases/19_exec_sequential_event1.sh &
+sleep 1
+bash testcases/20_exec_sequential_event2.sh
+# In AAP Jobs: event2 starts only after event1 finishes (~10s later)
+
+# Parallel — send both events quickly, observe both run simultaneously
+bash testcases/21_exec_parallel_event1.sh &
+sleep 1
+bash testcases/22_exec_parallel_event2.sh
+# In AAP Jobs: both jobs run at the same time
+```
+
+## Running Multi-Match Demo
+
+```bash
+# Single match — check AAP Jobs: only ONE job launched
+bash testcases/16_match_single_critical.sh
+# Expected: 1 job (Action-A with rule "Handle-Critical-Severity")
+
+# Multiple match — check AAP Jobs: TWO jobs launched for same event
+bash testcases/18_match_multiple_critical.sh
+# Expected: 2 jobs (Action-A for remediation + Action-B for notification)
+```

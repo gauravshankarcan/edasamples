@@ -1,0 +1,99 @@
+---
+# EDA Sample: Single-match behaviour (default) — only ONE rule fires per event
+#
+# In this rulebook, two rules have overlapping conditions. Both would logically
+# match a "critical" severity alert, but because EDA evaluates conditions in
+# order and each rule is INDEPENDENT, the behaviour here is that BOTH rules
+# actually match (see multi-match example for the nuanced difference).
+#
+# The key point of this rulebook is to show the SINGLE-ACTION-PER-RULE pattern:
+# Each rule fires at most ONE action. There is no "else-if" chaining.
+# You explicitly guard with conditions that don't overlap if you want exclusivity.
+#
+# Payload schema:
+#   {
+#     "event_type": "alert | incident | info",
+#     "severity":   "critical | high | medium | low",
+#     "event_id":   "EVT-001",
+#     "message":    "disk 95% full",
+#     "notification_channel": "slack"
+#   }
+#
+# HOW IT DIFFERS from multi-match rulebook:
+#   In this rulebook, Rule 1 ("critical severity") and Rule 2 ("alert type")
+#   both have conditions that might be TRUE for the same event. But ONLY rules
+#   whose conditions actually match the event payload will fire.
+#   Here we use NON-OVERLAPPING conditions (mutually exclusive severity levels)
+#   to guarantee only ONE rule fires per event.
+#
+# Test:
+#   curl -X POST https://<activation-url> -H "Content-Type: application/json" \
+#     -d '{"event_type":"alert","severity":"critical","event_id":"EVT-001","message":"disk full"}'
+
+- name: "EDA Single Match — Mutually Exclusive Conditions"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    aap_organization: "Default"
+
+  rules:
+    # ── Rule 1: Critical severity — exclusive condition ──────────────────────
+    # Fires ONLY when severity is exactly "critical".
+    # Will NOT fire for "high", "medium", or "low".
+    - name: "Handle critical severity alert"
+      condition: >
+        event.payload.event_type is defined and
+        event.payload.severity == "critical"
+      action:
+        run_job_template:
+          name: "EDA-Match-Multiple-Action-A"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_severity: "{{ event.payload.severity }}"
+              eda_triggered_rule: "Handle-Critical-Severity"
+
+    # ── Rule 2: High severity — exclusive condition ──────────────────────────
+    # Fires ONLY when severity is exactly "high".
+    # NON-overlapping with Rule 1 — a "critical" event will NOT trigger this.
+    - name: "Handle high severity alert"
+      condition: >
+        event.payload.event_type is defined and
+        event.payload.severity == "high"
+      action:
+        run_job_template:
+          name: "EDA-Match-Multiple-Action-A"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_severity: "{{ event.payload.severity }}"
+              eda_triggered_rule: "Handle-High-Severity"
+
+    # ── Rule 3: Low/medium — grouped with OR condition ───────────────────────
+    # Fires for both "low" and "medium". Uses 'or' inside condition.
+    - name: "Handle low/medium severity alerts"
+      condition: >
+        event.payload.event_type is defined and
+        (event.payload.severity == "low" or event.payload.severity == "medium")
+      action:
+        debug:
+          msg: >-
+            Low/medium severity event received ({{ event.payload.severity }}) —
+            logging only, no job template triggered.
+
+    # ── Rule 4: Unknown / missing severity — catch-all ───────────────────────
+    - name: "Handle events with no severity field"
+      condition: >
+        event.payload.event_type is defined and
+        event.payload.severity is not defined
+      action:
+        debug:
+          msg: "Event {{ event.payload.event_id | default('?') }} has no severity — ignoring"

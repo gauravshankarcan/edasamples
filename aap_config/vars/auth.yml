@@ -11,3 +11,15 @@ aap_validate_certs: false
 aws_access_key_id: "{{ vault_aws_access_key_id }}"
 aws_secret_access_key: "{{ vault_aws_secret_access_key }}"
 aws_account_id: "{{ vault_aws_account_id }}"
+
+# Azure credentials — sourced from ~/.bashrc_eda_session
+# SERVICE PRINCIPAL: CLIENT_ID / PASSWORD / TENANT / SUBSCRIPTION / RESOURCEGROUP
+azure_client_id: "{{ lookup('env', 'CLIENT_ID') | default('', true) }}"
+azure_secret: "{{ lookup('env', 'PASSWORD') | default('', true) }}"
+azure_tenant: "{{ lookup('env', 'TENANT') | default('', true) }}"
+azure_subscription_id: "{{ lookup('env', 'SUBSCRIPTION') | default('', true) }}"
+azure_resource_group: "{{ lookup('env', 'RESOURCEGROUP') | default('eda-samples-rg', true) }}"
+
+# GitHub private repo access — sourced from ~/.bashrc_eda_session
+git_repo_url: "{{ lookup('env', 'GITHUB_URL') | default('', true) }}"
+github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('', true) }}"

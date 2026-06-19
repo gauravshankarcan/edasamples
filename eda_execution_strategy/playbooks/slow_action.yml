@@ -1,0 +1,61 @@
+---
+# Playbook: slow_action.yml — used by execution_strategy demo
+#
+# Deliberately sleeps for a configurable duration to make the timing
+# difference between sequential and parallel execution visible.
+#
+# When running in SEQUENTIAL mode, the second event waits for this sleep
+# to complete before its action starts.
+# When running in PARALLEL mode, multiple instances of this playbook
+# run concurrently — each sees its own sleep but they don't block each other.
+
+- name: "Execution Strategy Demo: Slow Action"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    eda_event_id: "{{ eda_event_id | default('no-id') }}"
+    eda_event_type: "{{ eda_event_type | default('unknown') }}"
+    eda_sleep_seconds: "{{ eda_sleep_seconds | default(10) | int }}"
+    eda_execution_mode: "{{ eda_execution_mode | default('unknown') }}"
+    eda_requestor: "{{ eda_requestor | default('eda') }}"
+
+  tasks:
+    - name: "Record start time"
+      ansible.builtin.set_fact:
+        start_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+    - name: "Log action start"
+      ansible.builtin.debug:
+        msg:
+          - "════════════════════════════════════"
+          - "  SLOW ACTION STARTED"
+          - "  Event ID:   {{ eda_event_id }}"
+          - "  Event type: {{ eda_event_type }}"
+          - "  Mode:       {{ eda_execution_mode }}"
+          - "  Sleep:      {{ eda_sleep_seconds }}s"
+          - "  Started:    {{ start_time }}"
+          - "════════════════════════════════════"
+          - ""
+          - "  In SEQUENTIAL mode: the next event waits for this sleep."
+          - "  In PARALLEL mode:   this sleep does not block other events."
+
+    - name: "Simulate slow work (sleep {{ eda_sleep_seconds }}s)"
+      ansible.builtin.pause:
+        seconds: "{{ eda_sleep_seconds }}"
+
+    - name: "Record end time"
+      ansible.builtin.set_fact:
+        end_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+    - name: "Log action complete"
+      ansible.builtin.debug:
+        msg:
+          - "════════════════════════════════════"
+          - "  SLOW ACTION COMPLETE"
+          - "  Event ID:   {{ eda_event_id }}"
+          - "  Mode:       {{ eda_execution_mode }}"
+          - "  Started:    {{ start_time }}"
+          - "  Completed:  {{ end_time }}"
+          - "════════════════════════════════════"

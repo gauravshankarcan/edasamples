@@ -1,0 +1,160 @@
+---
+# EDA Rulebook: Job Template with 'limit' targeting Azure VMs
+#
+# Azure counterpart to eda-limit-jobs.yml (which targets AWS EC2).
+# Same concept: the EDA event payload specifies WHICH Azure VMs to act on,
+# and the job template is limited to only those hosts.
+#
+# Dynamic inventory groups (from azure_rm plugin with keyed_groups on tags):
+#   webservers          → VMs tagged Group=webservers
+#   databases           → VMs tagged Group=databases
+#   env_staging         → VMs tagged Environment=staging
+#   role_web / role_db  → VMs tagged Role=web or Role=database
+#
+# Payload schema:
+#   {
+#     "action":       "patching | compliance_check | restart_service | reboot",
+#     "target_hosts": "eda-test-web01"  OR  "webservers"  OR  "env_staging",
+#     "service_name": "nginx"            (restart_service only),
+#     "requestor":    "ops-team",
+#     "change_id":    "CHG0001234"
+#   }
+#
+# Azure tag-based targeting payload:
+#   {
+#     "action":           "patching",
+#     "azure_tag_key":    "Group",
+#     "azure_tag_value":  "webservers",
+#     "requestor":        "cloud-ops",
+#     "change_id":        "CHG002"
+#   }
+#
+# Test:
+#   curl -X POST https://<activation-url> \
+#     -H "Content-Type: application/json" \
+#     -d '{
+#       "action": "patching",
+#       "target_hosts": "eda-test-web01",
+#       "requestor": "ops-team",
+#       "change_id": "CHG001"
+#     }'
+
+- name: "EDA Job Template with Limit — Azure"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    aap_organization: "Default"
+    default_limit: "eda-test-hosts"
+
+  rules:
+    # ── Rule 1: Patching — limit to specified hosts ──────────────────────────
+    - name: "Trigger patching for specified Azure hosts"
+      condition: >
+        event.payload.action == "patching" and
+        event.payload.target_hosts is defined
+      action:
+        run_job_template:
+          name: "EDA-Azure-Limit-OS-Patching"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            limit: "{{ event.payload.target_hosts }}"
+            extra_vars:
+              param_action: "patching"
+              param_requestor: "{{ event.payload.requestor | default('eda') }}"
+              param_change_id: "{{ event.payload.change_id | default('') }}"
+              eda_target_hosts: "{{ event.payload.target_hosts }}"
+              eda_cloud: "azure"
+
+    # ── Rule 2: Compliance check with limit ─────────────────────────────────
+    - name: "Run compliance check on specified Azure hosts"
+      condition: >
+        event.payload.action == "compliance_check" and
+        event.payload.target_hosts is defined
+      action:
+        run_job_template:
+          name: "EDA-Azure-Limit-OS-Patching"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            limit: "{{ event.payload.target_hosts }}"
+            extra_vars:
+              param_action: "compliance_check"
+              param_requestor: "{{ event.payload.requestor | default('eda') }}"
+              param_change_id: "{{ event.payload.change_id | default('') }}"
+              eda_cloud: "azure"
+
+    # ── Rule 3: Restart service — limit to specified hosts ──────────────────
+    - name: "Restart service on specified Azure hosts"
+      condition: >
+        event.payload.action == "restart_service" and
+        event.payload.target_hosts is defined and
+        event.payload.service_name is defined
+      action:
+        run_job_template:
+          name: "EDA-Azure-Limit-OS-Patching"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            limit: "{{ event.payload.target_hosts }}"
+            extra_vars:
+              param_action: "restart_service"
+              param_service_name: "{{ event.payload.service_name }}"
+              param_requestor: "{{ event.payload.requestor | default('eda') }}"
+              eda_cloud: "azure"
+
+    # ── Rule 4: Azure tag-based limit ───────────────────────────────────────
+    # Azure dynamic inventory creates groups from tags using keyed_groups:
+    #   tag Group=webservers  → group name: "webservers"
+    #   tag Environment=staging → group name: "env_staging"
+    # The limit string is the group name, not the tag key/value.
+    - name: "Target by Azure tag group"
+      condition: >
+        event.payload.action is defined and
+        event.payload.azure_tag_key is defined and
+        event.payload.azure_tag_value is defined
+      action:
+        run_job_template:
+          name: "EDA-Azure-Limit-OS-Patching"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            # Azure inventory keyed_groups with prefix="" and separator="" creates
+            # group names equal to the tag value directly (e.g., "webservers").
+            # For env_ prefix groups: "env_{{ azure_tag_value }}"
+            limit: "{{ event.payload.azure_tag_value }}"
+            extra_vars:
+              param_action: "{{ event.payload.action }}"
+              param_requestor: "{{ event.payload.requestor | default('eda') }}"
+              eda_azure_filter: "tag_{{ event.payload.azure_tag_key }}_{{ event.payload.azure_tag_value }}"
+              eda_cloud: "azure"
+
+    # ── Rule 5: Reboot with limit ────────────────────────────────────────────
+    - name: "Reboot specified Azure hosts"
+      condition: >
+        event.payload.action == "reboot" and
+        event.payload.target_hosts is defined
+      action:
+        run_job_template:
+          name: "EDA-Azure-Limit-OS-Patching"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            limit: "{{ event.payload.target_hosts }}"
+            extra_vars:
+              param_action: "reboot"
+              param_requestor: "{{ event.payload.requestor | default('eda') }}"
+              param_change_id: "{{ event.payload.change_id | default('') }}"
+              eda_cloud: "azure"
+
+    # ── Rule 6: Fallback — no target specified ───────────────────────────────
+    - name: "Reject events without target specification"
+      condition: >
+        event.payload.action is defined and
+        event.payload.target_hosts is not defined and
+        event.payload.azure_tag_key is not defined
+      action:
+        debug:
+          msg: >-
+            REJECTED: Event has action '{{ event.payload.action }}' but no
+            target_hosts or azure_tag_key/azure_tag_value specified.
+            Refusing to run against ALL hosts without an explicit limit.

@@ -10,6 +10,14 @@ aap_organizations:
 
 # ── Credentials ──────────────────────────────────────────────────────────────
 controller_credentials:
+  - name: EDA-GitHub-Credential
+    description: "GitHub PAT for private repo clone (sourced from GITHUB_TOKEN)"
+    organization: Default
+    credential_type: Source Control
+    inputs:
+      username: "x-token"
+      password: "{{ github_token }}"
+
   - name: EDA-AWS-Credential
     description: "AWS credentials for EC2 dynamic inventory and eda_param_limit_jobs sample"
     organization: Default
@@ -17,6 +25,16 @@ controller_credentials:
     inputs:
       username: "{{ aws_access_key_id }}"
       password: "{{ aws_secret_access_key }}"
+
+  - name: EDA-Azure-Credential
+    description: "Azure Service Principal for Azure RM dynamic inventory and eda_param_limit_jobs Azure sample"
+    organization: Default
+    credential_type: Microsoft Azure Resource Manager
+    inputs:
+      subscription: "{{ azure_subscription_id }}"
+      client: "{{ azure_client_id }}"
+      secret: "{{ azure_secret }}"
+      tenant: "{{ azure_tenant }}"
 
 # ── Inventories ───────────────────────────────────────────────────────────────
 controller_inventories:
@@ -26,6 +44,10 @@ controller_inventories:
 
   - name: EDA-AWS-Dynamic-Inventory
     description: "AWS EC2 dynamic inventory for eda_param_limit_jobs — targets tagged instances"
+    organization: Default
+
+  - name: EDA-Azure-Inventory
+    description: "Azure RM dynamic inventory for eda_param_limit_jobs Azure — targets tagged VMs"
     organization: Default
 
 # ── Hosts (in static inventory) ───────────────────────────────────────────────
@@ -62,6 +84,30 @@ controller_inventory_sources:
         - tag:Name
         - private-ip-address
 
+  - name: EDA-AzureRM-Source
+    description: "Azure RM dynamic inventory source — discovers VMs tagged Owner=eda-samples"
+    inventory: EDA-Azure-Inventory
+    source: azure_rm
+    credential: EDA-Azure-Credential
+    overwrite: true
+    update_on_launch: true
+    source_vars:
+      tags:
+        Owner: "eda-samples"
+      keyed_groups:
+        - key: "tags.Group | default('')"
+          prefix: ""
+          separator: ""
+        - key: "tags.Environment | default('')"
+          prefix: "env_"
+          separator: ""
+        - key: "tags.Role | default('')"
+          prefix: "role_"
+          separator: ""
+      default_host_filters:
+        - "powerstate == 'running'"
+      use_vm_name: true
+
 # ── Projects ─────────────────────────────────────────────────────────────────
 controller_projects:
   - name: EDA-Samples-Project
@@ -70,6 +116,7 @@ controller_projects:
     scm_type: git
     scm_url: "{{ git_repo_url }}"
     scm_branch: main
+    scm_credential: EDA-GitHub-Credential
     update_on_launch: false
     wait: true
 
@@ -125,3 +172,42 @@ controller_templates:
     playbook: "eda_regex_samples/playbooks/process_with_regex.yml"
     ask_variables_on_launch: true
     ask_limit_on_launch: true
+
+  - name: EDA-Azure-Limit-OS-Patching
+    description: "OS patching / compliance check — runs on Azure VMs specified by EDA limit"
+    job_type: run
+    organization: Default
+    inventory: EDA-Azure-Inventory
+    project: EDA-Samples-Project
+    playbook: "eda_param_limit_jobs/playbooks/limited_action.yml"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    credentials:
+      - EDA-Azure-Credential
+
+  - name: EDA-Match-Multiple-Action-A
+    description: "Action A for match_multiple_rules demo — logs event alpha fields"
+    job_type: run
+    organization: Default
+    inventory: EDA-Sample-Inventory
+    project: EDA-Samples-Project
+    playbook: "eda_match_multiple/playbooks/action_a.yml"
+    ask_variables_on_launch: true
+
+  - name: EDA-Match-Multiple-Action-B
+    description: "Action B for match_multiple_rules demo — logs event beta fields"
+    job_type: run
+    organization: Default
+    inventory: EDA-Sample-Inventory
+    project: EDA-Samples-Project
+    playbook: "eda_match_multiple/playbooks/action_b.yml"
+    ask_variables_on_launch: true
+
+  - name: EDA-Execution-Strategy-Action
+    description: "Long-running action for execution_strategy demo"
+    job_type: run
+    organization: Default
+    inventory: EDA-Sample-Inventory
+    project: EDA-Samples-Project
+    playbook: "eda_execution_strategy/playbooks/slow_action.yml"
+    ask_variables_on_launch: true

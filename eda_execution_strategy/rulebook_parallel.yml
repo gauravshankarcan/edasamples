@@ -1,0 +1,71 @@
+---
+# EDA Sample: Parallel Execution Strategy
+#
+# When an EDA activation uses execution_strategy: parallel, the rulebook
+# can process MULTIPLE events concurrently. A new event does NOT wait for
+# the previous event's action to complete before starting its own action.
+#
+# KEY BEHAVIOUR:
+#   Event 1 arrives → Action A starts (10s sleep) — does NOT block
+#   Event 2 arrives → Action B starts immediately (concurrent with Action A)
+#   Both actions run at the same time.
+#
+# WHEN TO USE:
+#   - High-volume alert ingestion (many events per second)
+#   - Stateless actions where order doesn't matter
+#   - Fast-response requirements (don't let slow jobs delay other events)
+#   - Each event targets a different host (patching host A and host B concurrently)
+#
+# WHEN NOT TO USE:
+#   - Ordered processing required (use sequential)
+#   - Actions with shared state that would conflict
+#   - Actions on the SAME host where concurrent changes cause conflicts
+#
+# IMPORTANT: The execution_strategy is set on the ACTIVATION in AAP EDA,
+# not in the rulebook itself. The rulebook is the same — only the activation
+# configuration differs between sequential and parallel.
+#
+# Payload schema:
+#   {
+#     "event_type": "alert | patch | scan",
+#     "event_id":   "EVT-001",
+#     "sleep_seconds": 10,
+#     "requestor":  "monitoring"
+#   }
+#
+# Test (send two events rapidly — both start immediately, run concurrently):
+#   curl -X POST https://<activation-url> -H "Content-Type: application/json" \
+#     -d '{"event_type":"alert","event_id":"EVT-001","sleep_seconds":10}'
+#   curl -X POST https://<activation-url> -H "Content-Type: application/json" \
+#     -d '{"event_type":"alert","event_id":"EVT-002","sleep_seconds":5}'
+#
+# Observe in AAP Controller → Jobs:
+#   EVT-001 and EVT-002 jobs run concurrently.
+#   EVT-002 (5s) finishes BEFORE EVT-001 (10s) even though it arrived second.
+
+- name: "EDA Parallel Execution Strategy Demo"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    aap_organization: "Default"
+
+  rules:
+    # In parallel mode, this action does NOT block the next event.
+    # Multiple instances of this job template can run simultaneously.
+    - name: "Process event in parallel (non-blocking)"
+      condition: event.payload.event_type is defined
+      action:
+        run_job_template:
+          name: "EDA-Execution-Strategy-Action"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_sleep_seconds: "{{ event.payload.sleep_seconds | default(10) }}"
+              eda_execution_mode: "parallel"
+              eda_requestor: "{{ event.payload.requestor | default('eda') }}"

@@ -3,10 +3,8 @@
 # Consumed by infra.aap_configuration.dispatch (eda roles section).
 
 # ── Decision Environments ─────────────────────────────────────────────────────
-# The EDA-Community-DE image is built with:
-#   podman build -t eda-community-de decision-environment/
-# and pushed to the OpenShift internal registry imagestream.
-# See decision-environment/build.sh for the full build + push procedure.
+# The EDA-Community-DE image is built and registered with:
+#   ansible-playbook decision-environment/build_de.yml
 eda_decision_environments:
   - name: EDA-Community-DE
     description: "Custom DE with community.aws 11.0.0 and ansible.eda 2.10.0"
@@ -15,8 +13,15 @@ eda_decision_environments:
     pull_policy: always
 
 # ── EDA Credentials ───────────────────────────────────────────────────────────
-# This credential lets EDA activations call run_job_template on AAP Controller.
 eda_credentials:
+  - name: EDA-GitHub-SCM-Credential
+    description: "GitHub PAT for EDA project private repo clone (sourced from GITHUB_TOKEN)"
+    organization: Default
+    credential_type: "Source Control"
+    inputs:
+      username: "x-token"
+      password: "{{ github_token }}"
+
   - name: EDA-AAP-Controller-Credential
     description: "AAP Controller connection used by all rulebook activations"
     organization: Default
@@ -41,6 +46,7 @@ eda_projects:
     scm_type: git
     scm_branch: main
     organization: Default
+    credential: EDA-GitHub-SCM-Credential
     verify_ssl: false
 
 # ── Rulebook Activations ─────────────────────────────────────────────────────
@@ -115,3 +121,70 @@ eda_rulebook_activations:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-regex-demo-activation
     log_level: error
+
+  - name: eda-azure-limit-jobs-activation
+    description: "Webhook with Azure VM limit → EDA-Azure-Limit-OS-Patching"
+    project: EDA-Samples
+    rulebook: eda-limit-jobs-azure.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-azure-limit-jobs-activation
+    log_level: error
+
+  - name: eda-match-single-activation
+    description: "Single-match demo — only first matching rule fires"
+    project: EDA-Samples
+    rulebook: eda-match-single.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-match-single-activation
+    log_level: info
+
+  - name: eda-match-multiple-activation
+    description: "Multiple-match demo — all matching rules fire for same event"
+    project: EDA-Samples
+    rulebook: eda-match-multiple.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-match-multiple-activation
+    log_level: info
+
+  - name: eda-execution-sequential-activation
+    description: "Sequential execution strategy — events processed one at a time"
+    project: EDA-Samples
+    rulebook: eda-execution-sequential.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    execution_strategy: sequential
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-execution-sequential-activation
+    log_level: info
+
+  - name: eda-execution-parallel-activation
+    description: "Parallel execution strategy — events processed concurrently"
+    project: EDA-Samples
+    rulebook: eda-execution-parallel.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    execution_strategy: parallel
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-execution-parallel-activation
+    log_level: info

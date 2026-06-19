@@ -54,7 +54,7 @@
 # ──────────────
 # Before running, ensure:
 #   1. The EDA-Community-DE image is built and pushed to the OCP imagestream:
-#        cd decision-environment && ./build.sh
+#        ansible-playbook decision-environment/build_de.yml
 #   2. OCP Routes exist for each activation's k8s_service_name:
 #        oc apply -f aap_config/ocp_routes.yml -n aap
 #      (The routes are created automatically by configure_aap.yml step 2 below)
@@ -161,6 +161,20 @@
       awx.awx.inventory:
         name: EDA-AWS-Dynamic-Inventory
         description: "AWS EC2 dynamic inventory for eda_param_limit_jobs — targets tagged instances"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      environment:
+        CONTROLLER_OPTIONAL_API_URLPATTERN_PREFIX: "/api/controller/"
+      tags:
+        - inventories
+
+    - name: "Create EDA-Azure-Inventory"
+      awx.awx.inventory:
+        name: EDA-Azure-Inventory
+        description: "Azure RM dynamic inventory for eda_param_limit_jobs Azure — targets tagged VMs"
         organization: Default
         state: present
         controller_host: "{{ aap_hostname }}"
@@ -340,6 +354,18 @@
       tags:
         - inventories
 
+    - name: "Create EDA-Azure-Inventory (Azure RM dynamic)"
+      awx.awx.inventory:
+        name: EDA-Azure-Inventory
+        description: "Azure RM dynamic inventory for eda_param_limit_jobs Azure — targets tagged VMs"
+        organization: Default
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      tags:
+        - inventories
+
     - name: "Configure localhost host in EDA-Sample-Inventory"
       awx.awx.host:
         name: localhost
@@ -388,6 +414,40 @@
         - inventories
         - inventory_sources
 
+    - name: "Configure Azure RM inventory source"
+      awx.awx.inventory_source:
+        name: EDA-AzureRM-Source
+        description: "Azure RM dynamic inventory — discovers VMs tagged Owner=eda-samples"
+        inventory: EDA-Azure-Inventory
+        source: azure_rm
+        credential: EDA-Azure-Credential
+        overwrite: true
+        update_on_launch: true
+        state: present
+        source_vars:
+          tags:
+            Owner: "eda-samples"
+          keyed_groups:
+            - key: "tags.Group | default('')"
+              prefix: ""
+              separator: ""
+            - key: "tags.Environment | default('')"
+              prefix: "env_"
+              separator: ""
+            - key: "tags.Role | default('')"
+              prefix: "role_"
+              separator: ""
+          default_host_filters:
+            - "powerstate == 'running'"
+          use_vm_name: true
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      when: azure_client_id | default('') | length > 0
+      tags:
+        - inventories
+        - inventory_sources
+
 # ── Step 2: Create OCP Routes for EDA webhook services ───────────────────────
 # The infra.aap_configuration collection configures EDA but does not know about
 # the OpenShift Route objects needed to expose each activation's ClusterIP service
@@ -407,6 +467,11 @@
       - eda-limit-jobs-activation
       - eda-requestor-activation
       - eda-regex-demo-activation
+      - eda-azure-limit-jobs-activation
+      - eda-match-single-activation
+      - eda-match-multiple-activation
+      - eda-execution-sequential-activation
+      - eda-execution-parallel-activation
 
   pre_tasks:
     - name: "Load vault credentials"

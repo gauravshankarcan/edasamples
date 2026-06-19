@@ -1,0 +1,230 @@
+schemaVersion: 2.3.0
+
+metadata:
+  name: eda-samples
+  displayName: EDA Samples — Event-Driven Ansible
+  description: >
+    Development workspace for the EDA Samples repository.
+    Includes ansible-core, ansible-builder, ansible-navigator, awx.awx collection,
+    azure.azcollection, and all tools needed to build/test EDA rulebooks and Decision Environments.
+  version: 1.0.0
+  language: yaml
+  projectType: ansible
+
+projects:
+  - name: edasamples
+    git:
+      remotes:
+        origin: https://github.com/gauravshankarcan/edasamples.git
+      checkoutFrom:
+        revision: main
+
+starterProjects:
+  - name: edasamples-starter
+    description: "Clone the EDA samples repository"
+    git:
+      remotes:
+        origin: https://github.com/gauravshankarcan/edasamples.git
+      checkoutFrom:
+        revision: main
+
+components:
+  - name: ansible-tools
+    container:
+      image: registry.redhat.io/ansible-automation-platform-27/ee-supported-rhel9:latest
+      memoryLimit: 2Gi
+      memoryRequest: 512Mi
+      cpuLimit: "2"
+      cpuRequest: "500m"
+      mountSources: true
+      sourceMapping: /projects
+
+      env:
+        # AAP connection — override these in your Dev Spaces user preferences
+        # or mount as a secret. Values below match ~/.bashrc_eda_session defaults.
+        - name: AAP_BASE
+          value: "https://aap-aap.apps-crc.testing"
+        - name: AAP_USER
+          value: "admin"
+
+        # Azure auth placeholders — set real values in Dev Spaces secrets
+        - name: TENANT
+          value: ""
+        - name: SUBSCRIPTION
+          value: ""
+        - name: CLIENT_ID
+          value: ""
+        - name: RESOURCEGROUP
+          value: ""
+
+        # GitHub access for repo operations
+        - name: GITHUB_URL
+          value: "https://github.com/gauravshankarcan/edasamples.git"
+
+        # Ansible config
+        - name: ANSIBLE_FORCE_COLOR
+          value: "1"
+        - name: ANSIBLE_HOST_KEY_CHECKING
+          value: "False"
+        - name: ANSIBLE_STDOUT_CALLBACK
+          value: "yaml"
+
+      endpoints:
+        - name: ansible-navigator-ui
+          targetPort: 8080
+          exposure: public
+          protocol: https
+
+  - name: tools
+    container:
+      image: registry.access.redhat.com/ubi9/python-312:latest
+      memoryLimit: 512Mi
+      mountSources: false
+      command:
+        - /bin/bash
+        - "-c"
+        - "sleep infinity"
+
+commands:
+  # ── Install collections ────────────────────────────────────────────────────
+  - id: install-collections
+    exec:
+      label: "Install Ansible collections"
+      component: ansible-tools
+      commandLine: "ansible-galaxy collection install -r requirements.yml --force"
+      workingDir: /projects/edasamples
+
+  - id: install-aap-config-collections
+    exec:
+      label: "Install AAP config collections"
+      component: ansible-tools
+      commandLine: "ansible-galaxy collection install -r aap_config/requirements.yml --force"
+      workingDir: /projects/edasamples
+
+  # ── Configure AAP ──────────────────────────────────────────────────────────
+  - id: configure-aap-all
+    exec:
+      label: "Configure full AAP (Controller + EDA)"
+      component: ansible-tools
+      commandLine: >-
+        ansible-playbook aap_config/configure_aap.yml
+        -e @aap_config/vault.yml
+        --ask-vault-pass
+      workingDir: /projects/edasamples
+
+  - id: configure-aap-eda-only
+    exec:
+      label: "Configure EDA activations only"
+      component: ansible-tools
+      commandLine: >-
+        ansible-playbook aap_config/configure_aap.yml
+        -e @aap_config/vault.yml
+        --ask-vault-pass
+        --tags eda
+      workingDir: /projects/edasamples
+
+  # ── Per-sample setup ───────────────────────────────────────────────────────
+  - id: setup-samples
+    exec:
+      label: "Setup basic webhook sample"
+      component: ansible-tools
+      commandLine: "source ~/.bashrc_eda_session && ansible-playbook samples/setup_aap.yml"
+      workingDir: /projects/edasamples
+
+  - id: setup-param-samples
+    exec:
+      label: "Setup parameterized samples"
+      component: ansible-tools
+      commandLine: "source ~/.bashrc_eda_session && ansible-playbook eda_param_samples/setup_aap.yml"
+      workingDir: /projects/edasamples
+
+  - id: setup-limit-jobs-aws
+    exec:
+      label: "Setup limit jobs (AWS)"
+      component: ansible-tools
+      commandLine: "source ~/.bashrc_eda_session && ansible-playbook eda_param_limit_jobs/setup_aap.yml"
+      workingDir: /projects/edasamples
+
+  - id: setup-limit-jobs-azure
+    exec:
+      label: "Setup limit jobs (Azure)"
+      component: ansible-tools
+      commandLine: "source ~/.bashrc_eda_session && ansible-playbook eda_param_limit_jobs/setup_aap_azure.yml"
+      workingDir: /projects/edasamples
+
+  - id: setup-match-multiple
+    exec:
+      label: "Setup match_multiple_rules demo"
+      component: ansible-tools
+      commandLine: "source ~/.bashrc_eda_session && ansible-playbook eda_match_multiple/setup_aap.yml"
+      workingDir: /projects/edasamples
+
+  - id: setup-execution-strategy
+    exec:
+      label: "Setup execution_strategy demo"
+      component: ansible-tools
+      commandLine: "source ~/.bashrc_eda_session && ansible-playbook eda_execution_strategy/setup_aap.yml"
+      workingDir: /projects/edasamples
+
+  # ── Azure VM lifecycle ─────────────────────────────────────────────────────
+  - id: azure-create-vms
+    exec:
+      label: "Create Azure test VMs"
+      component: ansible-tools
+      commandLine: "source ~/.bashrc_eda_session && ansible-playbook eda_param_limit_jobs/azure/create_test_vms.yml"
+      workingDir: /projects/edasamples
+
+  - id: azure-teardown-vms
+    exec:
+      label: "Teardown Azure test VMs"
+      component: ansible-tools
+      commandLine: "source ~/.bashrc_eda_session && ansible-playbook eda_param_limit_jobs/azure/teardown_vms.yml"
+      workingDir: /projects/edasamples
+
+  # ── Decision Environment ───────────────────────────────────────────────────
+  - id: build-de
+    exec:
+      label: "Build custom Decision Environment"
+      component: ansible-tools
+      commandLine: "source ~/.bashrc_eda_session && ansible-playbook decision-environment/build_de.yml"
+      workingDir: /projects/edasamples
+
+  # ── Test cases ─────────────────────────────────────────────────────────────
+  - id: test-webhook-basic
+    exec:
+      label: "Test: basic webhook"
+      component: ansible-tools
+      commandLine: "bash testcases/01_webhook_basic.sh"
+      workingDir: /projects/edasamples
+
+  - id: test-match-multiple
+    exec:
+      label: "Test: match multiple rules"
+      component: ansible-tools
+      commandLine: "bash testcases/18_match_multiple_critical.sh"
+      workingDir: /projects/edasamples
+
+  - id: test-exec-parallel
+    exec:
+      label: "Test: parallel execution (send 2 events)"
+      component: ansible-tools
+      commandLine: >-
+        bash testcases/21_exec_parallel_event1.sh &
+        sleep 1 &&
+        bash testcases/22_exec_parallel_event2.sh
+      workingDir: /projects/edasamples
+
+  # ── Linting ────────────────────────────────────────────────────────────────
+  - id: lint-rulebooks
+    exec:
+      label: "Lint all rulebooks with ansible-lint"
+      component: ansible-tools
+      commandLine: "ansible-lint rulebooks/"
+      workingDir: /projects/edasamples
+
+  - id: lint-playbooks
+    exec:
+      label: "Lint all playbooks with ansible-lint"
+      component: ansible-tools
+      commandLine: "ansible-lint samples/ eda_param_samples/ eda_param_limit_jobs/ eda_match_multiple/ eda_execution_strategy/"
+      workingDir: /projects/edasamples

@@ -1,0 +1,68 @@
+---
+# EDA Sample: Sequential Execution Strategy
+#
+# When an EDA activation uses execution_strategy: sequential (the default),
+# the rulebook processes events ONE AT A TIME. A new event will wait in a
+# queue until the action from the previous event has FINISHED.
+#
+# KEY BEHAVIOUR:
+#   Event 1 arrives → Action A starts (10s sleep) → Action A finishes
+#   Event 2 arrives → (waits) → Action B starts → ...
+#
+# This means: if actions are slow (long-running playbooks), events queue up.
+# Fast events are not dropped, but latency increases under load.
+#
+# WHEN TO USE:
+#   - You MUST process events in arrival order
+#   - Actions have side effects that conflict if run concurrently
+#     (e.g., database migrations, stateful deployments)
+#   - Compliance: one change at a time with full audit trail
+#
+# WHEN NOT TO USE:
+#   - High-volume alert processing
+#   - Stateless actions where order doesn't matter
+#   - Fast-response requirements (use parallel instead)
+#
+# Payload schema:
+#   {
+#     "event_type": "deploy | patch | config_change",
+#     "event_id":   "EVT-001",
+#     "sleep_seconds": 10,
+#     "requestor":  "ops-team"
+#   }
+#
+# Test (send two events rapidly — the second will queue behind the first):
+#   curl -X POST https://<activation-url> -H "Content-Type: application/json" \
+#     -d '{"event_type":"deploy","event_id":"EVT-001","sleep_seconds":10}'
+#   curl -X POST https://<activation-url> -H "Content-Type: application/json" \
+#     -d '{"event_type":"deploy","event_id":"EVT-002","sleep_seconds":5}'
+#
+# Observe in AAP Controller → Jobs:
+#   EVT-002 job starts AFTER EVT-001 job completes (sequential queuing)
+
+- name: "EDA Sequential Execution Strategy Demo"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  vars:
+    aap_organization: "Default"
+
+  rules:
+    # In sequential mode, this action blocks the next event from being processed
+    # until the job template completes.
+    - name: "Process event sequentially (blocking)"
+      condition: event.payload.event_type is defined
+      action:
+        run_job_template:
+          name: "EDA-Execution-Strategy-Action"
+          organization: "{{ vars.aap_organization }}"
+          job_args:
+            extra_vars:
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_sleep_seconds: "{{ event.payload.sleep_seconds | default(10) }}"
+              eda_execution_mode: "sequential"
+              eda_requestor: "{{ event.payload.requestor | default('eda') }}"
