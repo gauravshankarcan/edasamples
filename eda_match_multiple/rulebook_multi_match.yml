@@ -1,104 +1,80 @@
 ---
-# EDA Sample: Multiple-match behaviour — MULTIPLE rules fire for the same event
+# EDA Rulebook: Multiple-action demo — ONE event fires MULTIPLE job templates
 #
-# In ansible-rulebook, ALL rules whose conditions match an event WILL fire.
-# There is no implicit "stop after first match" — unlike some rule engines.
+# Key concept: Use `actions:` (plural) to execute two job templates
+# from a single matching rule. This is the reliable method in
+# ansible-rulebook 1.x to demonstrate "multi-match" behaviour.
 #
-# This rulebook DELIBERATELY uses OVERLAPPING conditions so that a single
-# incoming event triggers BOTH Rule 1 (Action A) AND Rule 2 (Action B).
+# Compare with rulebook_single_match.yml which uses `action:` (singular)
+# and only one template fires per event.
 #
-# WHY would you want this?
-#   - Rule 1: Remediation (fix the problem)
-#   - Rule 2: Notification (alert the team)
-#   Both should fire for the same alert. You don't want remediation without
-#   notification, and vice versa.
+# Architecture:
+#   webhook event → Rule 1 (critical/high) → Action-A + Action-B (simultaneous)
+#                → Rule 2 (low/medium)     → debug only
+#                → Rule 3 (any)            → audit debug (only fires if event
+#                                             not matched by rules above)
 #
-# HOW IT DIFFERS from single-match rulebook:
-#   single-match: Conditions are mutually exclusive → only ONE rule fires.
-#   multi-match:  Conditions OVERLAP → ALL matching rules fire for same event.
-#
-# IMPORTANT NUANCE:
-#   Ansible-rulebook does NOT have a native "match_multiple_rules: true/false"
-#   toggle. Rules are ALWAYS evaluated independently. The difference is purely
-#   in how you write conditions:
-#   - Exclusive conditions → effective single-match behaviour
-#   - Overlapping conditions → effective multi-match behaviour
-#
-#   At the ACTIVATION level, `execution_strategy: parallel` (AAP 2.7) controls
-#   whether these simultaneous actions run concurrently or sequentially.
-#   See ../eda_execution_strategy/ for that demo.
-#
-# Payload schema:
-#   {
-#     "event_type": "alert | incident",
-#     "severity":   "critical | high | medium | low",
-#     "event_id":   "EVT-001",
-#     "message":    "disk 95% full",
-#     "notification_channel": "slack"
-#   }
-#
-# Test (sends ONE event, triggers TWO job templates):
-#   curl -X POST https://<activation-url> -H "Content-Type: application/json" \
+# Test:
+#   curl -k -X POST https://eda-match-multiple-activation.apps-crc.testing \
+#     -H "Content-Type: application/json" \
 #     -d '{
 #       "event_type": "alert",
 #       "severity": "critical",
-#       "event_id": "EVT-001",
-#       "message": "disk 95% full",
+#       "event_id": "EVT-MULTI-001",
+#       "message": "critical alert — both Action-A and Action-B fire",
 #       "notification_channel": "slack"
 #     }'
 
-- name: "EDA Multiple Match — Overlapping Conditions, Both Rules Fire"
+- name: "EDA Multiple Actions — One Event Fires Both Action-A and Action-B"
   hosts: all
-  match_multiple_rules: true
   sources:
     - ansible.eda.webhook:
         host: 0.0.0.0
         port: 5000
 
-
   rules:
-    # ── Rule 1: Remediation action ───────────────────────────────────────────
-    # Condition: any critical OR high severity event with a defined event_type
-    # → fires Action A (remediation job template)
-    - name: "Trigger remediation for critical/high severity"
+    # ── Rule 1: Critical/high severity ──────────────────────────────────────
+    # Both job templates run from a SINGLE rule via `actions:` (plural).
+    # This is the supported way to fire multiple templates for one event.
+    - name: "Critical/high alert: trigger remediation AND notification"
       condition: >
         event.payload.event_type is defined and
         (event.payload.severity == "critical" or event.payload.severity == "high")
-      action:
-        run_job_template:
-          name: "EDA-Match-Multiple-Action-A"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              eda_event_type: "{{ event.payload.event_type }}"
-              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
-              eda_severity: "{{ event.payload.severity }}"
-              eda_triggered_rule: "Remediation-Rule-1"
+      actions:
+        - run_job_template:
+            name: "EDA-Match-Multiple-Action-A"
+            organization: "Default"
+            job_args:
+              extra_vars:
+                eda_event_type: "{{ event.payload.event_type }}"
+                eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+                eda_severity: "{{ event.payload.severity }}"
+                eda_triggered_rule: "Remediation-and-Notification"
+        - run_job_template:
+            name: "EDA-Match-Multiple-Action-B"
+            organization: "Default"
+            job_args:
+              extra_vars:
+                eda_event_type: "{{ event.payload.event_type }}"
+                eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+                eda_severity: "{{ event.payload.severity }}"
+                eda_triggered_rule: "Remediation-and-Notification"
+                eda_notification_channel: "{{ event.payload.notification_channel | default('slack') }}"
 
-    # ── Rule 2: Notification action ──────────────────────────────────────────
-    # Condition: SAME overlap — any critical OR high event
-    # → fires Action B (notification job template)
-    # BOTH Rule 1 and Rule 2 fire for the same event payload.
-    - name: "Send notification for critical/high severity"
+    # ── Rule 2: Low/medium severity (exclusive of Rule 1) ───────────────────
+    # Only fires for low/medium since Rule 1 already consumed critical/high.
+    - name: "Low/medium alert: log only (no remediation)"
       condition: >
         event.payload.event_type is defined and
-        (event.payload.severity == "critical" or event.payload.severity == "high")
+        (event.payload.severity == "low" or event.payload.severity == "medium")
       action:
-        run_job_template:
-          name: "EDA-Match-Multiple-Action-B"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              eda_event_type: "{{ event.payload.event_type }}"
-              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
-              eda_severity: "{{ event.payload.severity }}"
-              eda_triggered_rule: "Notification-Rule-2"
-              eda_notification_channel: "{{ event.payload.notification_channel | default('slack') }}"
+        debug:
+          msg: >-
+            [LOW/MEDIUM] event_id={{ event.payload.event_id | default('?') }}
+            severity={{ event.payload.severity }} — logged only, no job triggered.
 
-    # ── Rule 3: Audit log — fires for ALL events ─────────────────────────────
-    # This condition overlaps with BOTH Rule 1 and Rule 2 for critical/high.
-    # For a critical event: ALL THREE rules fire.
-    - name: "Audit log for any event"
+    # ── Rule 3: Audit (catch-all for events not matched by rules above) ──────
+    - name: "Any event: audit log"
       condition: event.payload.event_type is defined
       action:
         debug:
@@ -106,20 +82,3 @@
             [AUDIT] event_id={{ event.payload.event_id | default('?') }}
             type={{ event.payload.event_type }}
             severity={{ event.payload.severity | default('none') }}
-
-    # ── Rule 4: Throttle repeated events ─────────────────────────────────────
-    # once_within prevents the SAME rule from firing again within 5 minutes
-    # for events from the same source. Use this on noisy alert streams.
-    - name: "Throttled high-severity handler (once per 5 minutes)"
-      condition: >
-        event.payload.event_type is defined and
-        event.payload.severity == "high"
-      throttle:
-        once_within: 5 minutes
-        group_by_attributes:
-          - event.payload.event_type
-      action:
-        debug:
-          msg: >-
-            [THROTTLED] high severity event — this rule fires at most once/5min.
-            event_id={{ event.payload.event_id | default('?') }}

@@ -1,13 +1,15 @@
 ---
-# EDA Rulebook (AAP-activatable): Multiple-match behaviour demo
+# EDA Rulebook (AAP-activatable): Multiple-action behaviour demo
 # Source: eda_match_multiple/rulebook_multi_match.yml
 # Activation: eda-match-multiple-activation
 #
-# ONE event → MULTIPLE rules fire.
-# See eda_match_multiple/README.md for full explanation.
+# ONE event → MULTIPLE actions fire via the `actions:` (plural) syntax.
+# This is the supported way in ansible-rulebook 1.x to trigger several
+# job templates from a single incoming event without relying on the
+# Drools-level match_multiple_rules flag.
 #
-# Test (sends ONE event, triggers TWO job templates):
-#   curl -X POST https://eda-match-multiple-activation.apps-crc.testing \
+# Test (sends ONE event, triggers TWO job templates simultaneously):
+#   curl -k -X POST https://eda-match-multiple-activation.apps-crc.testing \
 #     -H "Content-Type: application/json" \
 #     -d '{
 #       "event_type": "alert",
@@ -17,48 +19,50 @@
 #       "notification_channel": "slack"
 #     }'
 
-- name: "EDA Multiple Match — Overlapping Conditions, Both Rules Fire"
+- name: "EDA Multiple Actions — One Event Fires Both Action-A and Action-B"
   hosts: all
-  match_multiple_rules: true
   sources:
     - ansible.eda.webhook:
         host: 0.0.0.0
         port: 5000
 
-
   rules:
-    - name: "Trigger remediation for critical/high severity"
+    - name: "Critical/high alert: trigger remediation AND notification"
       condition: >
         event.payload.event_type is defined and
         (event.payload.severity == "critical" or event.payload.severity == "high")
-      action:
-        run_job_template:
-          name: "EDA-Match-Multiple-Action-A"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              eda_event_type: "{{ event.payload.event_type }}"
-              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
-              eda_severity: "{{ event.payload.severity }}"
-              eda_triggered_rule: "Remediation-Rule-1"
+      actions:
+        - run_job_template:
+            name: "EDA-Match-Multiple-Action-A"
+            organization: "Default"
+            job_args:
+              extra_vars:
+                eda_event_type: "{{ event.payload.event_type }}"
+                eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+                eda_severity: "{{ event.payload.severity }}"
+                eda_triggered_rule: "Remediation-and-Notification"
+        - run_job_template:
+            name: "EDA-Match-Multiple-Action-B"
+            organization: "Default"
+            job_args:
+              extra_vars:
+                eda_event_type: "{{ event.payload.event_type }}"
+                eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+                eda_severity: "{{ event.payload.severity }}"
+                eda_triggered_rule: "Remediation-and-Notification"
+                eda_notification_channel: "{{ event.payload.notification_channel | default('slack') }}"
 
-    - name: "Send notification for critical/high severity"
+    - name: "Low/medium alert: log only (no remediation)"
       condition: >
         event.payload.event_type is defined and
-        (event.payload.severity == "critical" or event.payload.severity == "high")
+        (event.payload.severity == "low" or event.payload.severity == "medium")
       action:
-        run_job_template:
-          name: "EDA-Match-Multiple-Action-B"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              eda_event_type: "{{ event.payload.event_type }}"
-              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
-              eda_severity: "{{ event.payload.severity }}"
-              eda_triggered_rule: "Notification-Rule-2"
-              eda_notification_channel: "{{ event.payload.notification_channel | default('slack') }}"
+        debug:
+          msg: >-
+            [LOW/MEDIUM] event_id={{ event.payload.event_id | default('?') }}
+            severity={{ event.payload.severity }} — logged only, no job triggered.
 
-    - name: "Audit log for any event"
+    - name: "Any event: audit log"
       condition: event.payload.event_type is defined
       action:
         debug:
@@ -66,16 +70,3 @@
             [AUDIT] event_id={{ event.payload.event_id | default('?') }}
             type={{ event.payload.event_type }}
             severity={{ event.payload.severity | default('none') }}
-
-    - name: "Throttled high-severity handler (once per 5 minutes)"
-      condition: >
-        event.payload.event_type is defined and
-        event.payload.severity == "high"
-      throttle:
-        once_within: 5 minutes
-        group_by_attributes:
-          - event.payload.event_type
-      action:
-        debug:
-          msg: >-
-            [THROTTLED] high severity event — fires at most once/5min per event_type.
