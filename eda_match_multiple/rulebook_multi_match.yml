@@ -1,18 +1,21 @@
 ---
-# EDA Rulebook: Multiple-action demo — ONE event fires MULTIPLE job templates
+# EDA Rulebook: Multiple-match demo — TWO rulesets share one source
 #
-# Key concept: Use `actions:` (plural) to execute two job templates
-# from a single matching rule. This is the reliable method in
-# ansible-rulebook 1.x to demonstrate "multi-match" behaviour.
+# CONCEPT: In ansible-rulebook, each ruleset in an activation receives
+# an independent copy of every event from shared sources. This provides
+# reliable "multi-match" behaviour: ONE webhook event triggers
+# BOTH Action-A (remediation) AND Action-B (notification) simultaneously.
 #
-# Compare with rulebook_single_match.yml which uses `action:` (singular)
-# and only one template fires per event.
+# Contrast with rulebook_single_match.yml where a single ruleset with
+# mutually exclusive conditions ensures only ONE rule fires per event.
 #
 # Architecture:
-#   webhook event → Rule 1 (critical/high) → Action-A + Action-B (simultaneous)
-#                → Rule 2 (low/medium)     → debug only
-#                → Rule 3 (any)            → audit debug (only fires if event
-#                                             not matched by rules above)
+#   webhook POST → ansible.eda.webhook (shared source)
+#                     ├─ Ruleset-A evaluates independently → Action-A
+#                     └─ Ruleset-B evaluates independently → Action-B
+#
+# The rulesets run in parallel — there is no dependency between them.
+# Ruleset-A does not block Ruleset-B from processing the same event.
 #
 # Test:
 #   curl -k -X POST https://eda-match-multiple-activation.apps-crc.testing \
@@ -21,11 +24,10 @@
 #       "event_type": "alert",
 #       "severity": "critical",
 #       "event_id": "EVT-MULTI-001",
-#       "message": "critical alert — both Action-A and Action-B fire",
-#       "notification_channel": "slack"
+#       "message": "critical alert — both rulesets fire for this one event"
 #     }'
 
-- name: "EDA Multiple Actions — One Event Fires Both Action-A and Action-B"
+- name: "Ruleset-A: Remediation — fires Action-A for critical/high severity"
   hosts: all
   sources:
     - ansible.eda.webhook:
@@ -33,52 +35,58 @@
         port: 5000
 
   rules:
-    # ── Rule 1: Critical/high severity ──────────────────────────────────────
-    # Both job templates run from a SINGLE rule via `actions:` (plural).
-    # This is the supported way to fire multiple templates for one event.
-    - name: "Critical/high alert: trigger remediation AND notification"
+    - name: "Critical/high: run remediation (EDA-Match-Multiple-Action-A)"
       condition: >
         event.payload.event_type is defined and
         (event.payload.severity == "critical" or event.payload.severity == "high")
-      actions:
-        - run_job_template:
-            name: "EDA-Match-Multiple-Action-A"
-            organization: "Default"
-            job_args:
-              extra_vars:
-                eda_event_type: "{{ event.payload.event_type }}"
-                eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
-                eda_severity: "{{ event.payload.severity }}"
-                eda_triggered_rule: "Remediation-and-Notification"
-        - run_job_template:
-            name: "EDA-Match-Multiple-Action-B"
-            organization: "Default"
-            job_args:
-              extra_vars:
-                eda_event_type: "{{ event.payload.event_type }}"
-                eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
-                eda_severity: "{{ event.payload.severity }}"
-                eda_triggered_rule: "Remediation-and-Notification"
-                eda_notification_channel: "{{ event.payload.notification_channel | default('slack') }}"
+      action:
+        run_job_template:
+          name: "EDA-Match-Multiple-Action-A"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_severity: "{{ event.payload.severity }}"
+              eda_triggered_ruleset: "Ruleset-A"
 
-    # ── Rule 2: Low/medium severity (exclusive of Rule 1) ───────────────────
-    # Only fires for low/medium since Rule 1 already consumed critical/high.
-    - name: "Low/medium alert: log only (no remediation)"
+    - name: "Low/medium: log only (no remediation)"
       condition: >
         event.payload.event_type is defined and
         (event.payload.severity == "low" or event.payload.severity == "medium")
       action:
         debug:
           msg: >-
-            [LOW/MEDIUM] event_id={{ event.payload.event_id | default('?') }}
-            severity={{ event.payload.severity }} — logged only, no job triggered.
+            [RULESET-A] low/medium severity — no remediation triggered.
 
-    # ── Rule 3: Audit (catch-all for events not matched by rules above) ──────
-    - name: "Any event: audit log"
-      condition: event.payload.event_type is defined
+- name: "Ruleset-B: Notification — fires Action-B for critical/high severity"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: "Critical/high: run notification (EDA-Match-Multiple-Action-B)"
+      condition: >
+        event.payload.event_type is defined and
+        (event.payload.severity == "critical" or event.payload.severity == "high")
+      action:
+        run_job_template:
+          name: "EDA-Match-Multiple-Action-B"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_severity: "{{ event.payload.severity }}"
+              eda_triggered_ruleset: "Ruleset-B"
+
+    - name: "Low/medium: audit log"
+      condition: >
+        event.payload.event_type is defined and
+        (event.payload.severity == "low" or event.payload.severity == "medium")
       action:
         debug:
           msg: >-
-            [AUDIT] event_id={{ event.payload.event_id | default('?') }}
-            type={{ event.payload.event_type }}
-            severity={{ event.payload.severity | default('none') }}
+            [RULESET-B] low/medium severity — notification not required.
