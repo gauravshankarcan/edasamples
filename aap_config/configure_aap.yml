@@ -448,6 +448,75 @@
         - inventories
         - inventory_sources
 
+# ── Step 1c: Directly create new EDA activations ─────────────────────────────
+# The infra.aap_configuration dispatch role's eda_rulebook_activations role
+# silently skips creation when the rulebook YAML has specific fields it does
+# not recognise (e.g. execution_strategy at the module level). This step uses
+# ansible.eda.rulebook_activation directly to ensure all new activations exist.
+
+- name: "Step 1c — Directly create/verify new EDA activations"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  pre_tasks:
+    - name: "Load vault credentials"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vault.yml"
+      no_log: true
+      tags: always
+
+    - name: "Load auth variables"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/auth.yml"
+      tags: always
+
+  tasks:
+    - name: "Create new EDA activations directly"
+      ansible.eda.rulebook_activation:
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        project: "EDA-Samples"
+        rulebook: "{{ item.rulebook }}"
+        decision_environment: "EDA-Community-DE"
+        organization: "Default"
+        enabled: true
+        restart_policy: on-failure
+        eda_credentials:
+          - EDA-AAP-Controller-Credential
+        k8s_service_name: "{{ item.name }}"
+        log_level: "{{ item.log_level }}"
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_username: admin
+        controller_password: "{{ vault_aap_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop:
+        - name: "eda-azure-limit-jobs-activation"
+          rulebook: "eda-limit-jobs-azure.yml"
+          description: "Webhook with Azure VM limit → EDA-Azure-Limit-OS-Patching"
+          log_level: error
+        - name: "eda-match-single-activation"
+          rulebook: "eda-match-single.yml"
+          description: "Single-match demo — mutually exclusive conditions"
+          log_level: info
+        - name: "eda-match-multiple-activation"
+          rulebook: "eda-match-multiple.yml"
+          description: "Multi-action demo — one event fires Action-A then Action-B"
+          log_level: info
+        - name: "eda-execution-sequential-activation"
+          rulebook: "eda-execution-sequential.yml"
+          description: "Sequential execution strategy — events processed one at a time"
+          log_level: info
+        - name: "eda-execution-parallel-activation"
+          rulebook: "eda-execution-parallel.yml"
+          description: "Parallel execution strategy — events processed concurrently"
+          log_level: info
+      loop_control:
+        label: "{{ item.name }}"
+      tags:
+        - eda
+
 # ── Step 2: Create OCP Routes for EDA webhook services ───────────────────────
 # The infra.aap_configuration collection configures EDA but does not know about
 # the OpenShift Route objects needed to expose each activation's ClusterIP service
