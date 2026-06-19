@@ -512,6 +512,10 @@
           rulebook: "eda-execution-parallel.yml"
           description: "Parallel execution strategy — events processed concurrently"
           log_level: info
+        - name: "eda-vault-demo-activation"
+          rulebook: "eda-vault-demo.yml"
+          description: "Vault demo — EDA triggers playbook that accesses ansible-vaulted secrets"
+          log_level: info
       loop_control:
         label: "{{ item.name }}"
       tags:
@@ -541,6 +545,7 @@
       - eda-match-multiple-activation
       - eda-execution-sequential-activation
       - eda-execution-parallel-activation
+      - eda-vault-demo-activation
 
   pre_tasks:
     - name: "Load vault credentials"

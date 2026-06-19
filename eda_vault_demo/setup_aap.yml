@@ -1,0 +1,143 @@
+---
+# setup_aap.yml — Configure AAP for the EDA Vault Demo
+#
+# Creates:
+#   • Vault Credential     : EDA-Vault-Credential (Vault Password type)
+#   • Job Template         : EDA-Vault-Demo (uses EDA-Vault-Credential)
+#   • EDA Activation       : eda-vault-demo-activation
+#   • OCP Route            : eda-vault-demo-activation.apps-crc.testing
+#
+# USAGE
+# ──────
+#   # Provide vault password as an extra-var (do NOT commit it in clear text):
+#   ansible-playbook eda_vault_demo/setup_aap.yml \
+#     -e vault_password="EDA-Vault-Demo-Pass-2026!" \
+#     -e vault_aap_password="${AAP_PASS}"
+#
+# PREREQUISITES
+# ─────────────
+#   • EDA-Sample-Inventory exists (run configure_aap.yml first, or create manually)
+#   • EDA-Samples-Project exists and is synced to the latest commit
+#   • EDA-Community-DE decision environment image is available
+#   • EDA-AAP-Controller-Credential exists
+
+- name: "Setup AAP for EDA Vault Demo"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  environment:
+    CONTROLLER_OPTIONAL_API_URLPATTERN_PREFIX: "/api/controller/"
+
+  vars:
+    aap_hostname: "https://aap-aap.apps-crc.testing"
+    aap_username: "admin"
+    aap_password: "{{ vault_aap_password | default(lookup('env', 'AAP_PASS')) }}"
+    aap_validate_certs: false
+    # vault_password must be supplied as an extra-var; never hardcode
+    vault_password: "{{ vault_password | mandatory }}"
+
+  tasks:
+    # ── Gateway token (AAP 2.5+ uses /api/gateway/ for token issuance) ────────
+    - name: "Get gateway token"
+      ansible.builtin.uri:
+        url: "{{ aap_hostname }}/api/gateway/v1/tokens/"
+        method: POST
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        body_format: json
+        body:
+          description: "eda-vault-demo setup token"
+          scope: write
+        status_code: [200, 201]
+      register: _token
+      no_log: true
+
+    - name: "Store gateway token"
+      ansible.builtin.set_fact:
+        aap_token: "{{ _token.json.token }}"
+      no_log: true
+
+    # ── Vault Credential ───────────────────────────────────────────────────────
+    - name: "Create EDA-Vault-Credential (Vault Password type)"
+      awx.awx.credential:
+        name: EDA-Vault-Credential
+        description: >-
+          Ansible Vault password for eda_vault_demo/vars/vault.yml.
+          Decrypts inline !vault strings at AAP Controller runtime.
+        organization: Default
+        credential_type: Vault
+        inputs:
+          vault_password: "{{ vault_password }}"
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+
+    # ── Job Template ───────────────────────────────────────────────────────────
+    - name: "Create EDA-Vault-Demo job template"
+      awx.awx.job_template:
+        name: EDA-Vault-Demo
+        description: >-
+          Vault demo — playbook accesses vaulted secrets decrypted by EDA-Vault-Credential
+        job_type: run
+        organization: Default
+        inventory: EDA-Sample-Inventory
+        project: EDA-Samples-Project
+        playbook: "eda_vault_demo/playbooks/use_vaulted_secret.yml"
+        credentials:
+          - EDA-Vault-Credential
+        ask_variables_on_launch: true
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ aap_token }}"
+        validate_certs: "{{ aap_validate_certs }}"
+
+    # ── EDA Activation ────────────────────────────────────────────────────────
+    - name: "Create eda-vault-demo-activation"
+      ansible.eda.rulebook_activation:
+        name: eda-vault-demo-activation
+        description: "Vault demo — EDA triggers playbook that accesses ansible-vaulted secrets"
+        project: EDA-Samples
+        rulebook: eda-vault-demo.yml
+        decision_environment: EDA-Community-DE
+        organization: Default
+        enabled: true
+        restart_policy: on-failure
+        eda_credentials:
+          - EDA-AAP-Controller-Credential
+        k8s_service_name: eda-vault-demo-activation
+        log_level: info
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ vault_aap_password | default(lookup('env', 'AAP_PASS')) }}"
+        validate_certs: "{{ aap_validate_certs }}"
+
+    # ── OCP Route ─────────────────────────────────────────────────────────────
+    - name: "Create OCP Route for eda-vault-demo-activation"
+      ansible.builtin.shell: |
+        export KUBECONFIG="{{ lookup('env', 'KUBECONFIG') | default('/tmp/kubeconfig-eda-session', true) }}"
+        oc apply -f - -n aap <<'YAML'
+        apiVersion: route.openshift.io/v1
+        kind: Route
+        metadata:
+          name: eda-vault-demo-activation
+        spec:
+          host: eda-vault-demo-activation.apps-crc.testing
+          to:
+            kind: Service
+            name: eda-vault-demo-activation
+          port:
+            targetPort: 5000
+          tls:
+            termination: edge
+            insecureEdgeTerminationPolicy: Redirect
+        YAML
+      register: route_result
+      changed_when: "'created' in route_result.stdout or 'configured' in route_result.stdout"
+
+    - name: "Show webhook URL"
+      ansible.builtin.debug:
+        msg: "Vault demo webhook: https://eda-vault-demo-activation.apps-crc.testing"

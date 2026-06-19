@@ -1,0 +1,39 @@
+---
+# vault-example.yml — UNENCRYPTED template showing the structure of vault.yml
+#
+# HOW TO CREATE YOUR OWN ENCRYPTED vault.yml
+# ────────────────────────────────────────────
+# 1. Choose a vault password and store it in AAP Controller:
+#      AAP → Resources → Credentials → New Credential
+#      Type: "Vault"
+#      Vault Password: <your vault password>
+#      Vault Identifier: (leave blank for default vault)
+#
+# 2. Encrypt each secret with ansible-vault encrypt_string:
+#      ansible-vault encrypt_string 'MyS3cretPass!' --name vault_db_password
+#    Copy the output (the !vault | block) into vault.yml.
+#
+# 3. Alternatively, encrypt the entire file:
+#      cp vault-example.yml vault.yml
+#      # Edit vault.yml with real values, THEN encrypt:
+#      ansible-vault encrypt vault.yml
+#
+# 4. Test decryption locally:
+#      ansible-playbook playbooks/use_vaulted_secret.yml \
+#        --vault-password-file ~/.vault_pass \
+#        -e eda_event_action=report
+#
+# STRUCTURE (replace values with ansible-vault encrypted strings)
+# ───────────────────────────────────────────────────────────────
+
+# Database credential — used by patching/deployment playbooks
+vault_db_password: "REPLACE_WITH_ENCRYPTED_STRING"
+
+# API key for external service integration
+vault_api_key: "REPLACE_WITH_ENCRYPTED_STRING"
+
+# SMTP relay password for notification emails
+vault_smtp_password: "REPLACE_WITH_ENCRYPTED_STRING"
+
+# Non-sensitive tag used to identify the environment (can be plaintext)
+vault_env_tag: "staging"

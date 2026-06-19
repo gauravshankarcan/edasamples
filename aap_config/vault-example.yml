@@ -19,3 +19,8 @@ vault_azure_client_id: "00000000-0000-0000-0000-000000000000"
 vault_azure_secret: "EXAMPLE~AzureServicePrincipalSecret"
 vault_azure_tenant: "mytenant.onmicrosoft.com"
 vault_azure_subscription_id: "00000000-0000-0000-0000-000000000000"
+
+# Vault password for eda_vault_demo/vars/vault.yml
+# This is the password you used when running: ansible-vault encrypt_string ...
+# It will be stored in AAP Controller as the "EDA-Vault-Credential".
+vault_vault_password: "REPLACE_WITH_YOUR_VAULT_PASSWORD"

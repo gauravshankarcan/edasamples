@@ -186,3 +186,16 @@ eda_rulebook_activations:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-execution-parallel-activation
     log_level: info
+
+  - name: eda-vault-demo-activation
+    description: "Vault demo — EDA triggers playbook that accesses ansible-vaulted secrets"
+    project: EDA-Samples
+    rulebook: eda-vault-demo.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-vault-demo-activation
+    log_level: info

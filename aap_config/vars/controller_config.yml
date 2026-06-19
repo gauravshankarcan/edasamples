@@ -36,6 +36,13 @@ controller_credentials:
       secret: "{{ azure_secret }}"
       tenant: "{{ azure_tenant }}"
 
+  - name: EDA-Vault-Credential
+    description: "Ansible Vault password for decrypting eda_vault_demo/vars/vault.yml at runtime"
+    organization: Default
+    credential_type: Vault
+    inputs:
+      vault_password: "{{ vault_vault_password }}"
+
 # ── Inventories ───────────────────────────────────────────────────────────────
 controller_inventories:
   - name: EDA-Sample-Inventory
@@ -211,3 +218,14 @@ controller_templates:
     project: EDA-Samples-Project
     playbook: "eda_execution_strategy/playbooks/slow_action.yml"
     ask_variables_on_launch: true
+
+  - name: EDA-Vault-Demo
+    description: "Vault demo — playbook accesses vaulted secrets decrypted by EDA-Vault-Credential"
+    job_type: run
+    organization: Default
+    inventory: EDA-Sample-Inventory
+    project: EDA-Samples-Project
+    playbook: "eda_vault_demo/playbooks/use_vaulted_secret.yml"
+    ask_variables_on_launch: true
+    credentials:
+      - EDA-Vault-Credential

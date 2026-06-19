@@ -1,0 +1,77 @@
+---
+# EDA Rulebook: Ansible Vault demo
+# Activation: eda-vault-demo-activation
+#
+# Demonstrates triggering playbooks that access Ansible-Vaulted secrets.
+# AAP Controller decrypts vault.yml at runtime using the attached
+# EDA-Vault-Credential (Vault Password credential type).
+#
+# Actions supported via event.payload.action:
+#   report — show that vault secrets are defined (lengths / prefixes only)
+#   verify — assert the vault_db_password meets complexity rules
+#   rotate — simulate a secret rotation workflow
+#
+# Test:
+#   curl -k -X POST https://eda-vault-demo-activation.apps-crc.testing \
+#     -H "Content-Type: application/json" \
+#     -d '{"action":"report","event_id":"EVT-VAULT-001","requestor":"ops-team"}'
+
+- name: "EDA Vault Demo — webhook triggers vaulted-secret playbook"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: "Report — confirm vault secrets are accessible"
+      condition: >
+        event.payload.action is defined and
+        event.payload.action == "report"
+      action:
+        run_job_template:
+          name: "EDA-Vault-Demo"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_event_action: "report"
+              eda_requestor: "{{ event.payload.requestor | default('eda') }}"
+
+    - name: "Verify — check vault_db_password complexity"
+      condition: >
+        event.payload.action is defined and
+        event.payload.action == "verify"
+      action:
+        run_job_template:
+          name: "EDA-Vault-Demo"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_event_action: "verify"
+              eda_requestor: "{{ event.payload.requestor | default('eda') }}"
+
+    - name: "Rotate — simulate secret rotation workflow"
+      condition: >
+        event.payload.action is defined and
+        event.payload.action == "rotate"
+      action:
+        run_job_template:
+          name: "EDA-Vault-Demo"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_event_action: "rotate"
+              eda_requestor: "{{ event.payload.requestor | default('eda') }}"
+
+    - name: "Unknown action — debug and ignore"
+      condition: >
+        event.payload.action is defined and
+        event.payload.action not in ["report", "verify", "rotate"]
+      action:
+        debug:
+          msg: >-
+            Unrecognised action '{{ event.payload.action }}'.
+            Supported: report | verify | rotate

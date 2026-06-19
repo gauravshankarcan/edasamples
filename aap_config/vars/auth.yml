@@ -23,3 +23,7 @@ azure_resource_group: "{{ lookup('env', 'RESOURCEGROUP') | default('eda-samples-
 # GitHub private repo access — sourced from ~/.bashrc_eda_session
 git_repo_url: "{{ lookup('env', 'GITHUB_URL') | default('', true) }}"
 github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('', true) }}"
+
+# Ansible Vault password for eda_vault_demo/vars/vault.yml
+# Store as vault_vault_password in aap_config/vault.yml (vault-encrypted)
+vault_vault_password: "{{ vault_vault_password | default('') }}"
