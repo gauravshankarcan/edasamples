@@ -49,6 +49,7 @@
 
 - name: "EDA Multiple Match — Overlapping Conditions, Both Rules Fire"
   hosts: all
+  match_multiple_rules: true
   sources:
     - ansible.eda.webhook:
         host: 0.0.0.0
