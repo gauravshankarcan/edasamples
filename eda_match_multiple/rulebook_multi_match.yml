@@ -54,8 +54,6 @@
         host: 0.0.0.0
         port: 5000
 
-  vars:
-    aap_organization: "Default"
 
   rules:
     # ── Rule 1: Remediation action ───────────────────────────────────────────
@@ -68,7 +66,7 @@
       action:
         run_job_template:
           name: "EDA-Match-Multiple-Action-A"
-          organization: "{{ vars.aap_organization }}"
+          organization: "Default"
           job_args:
             extra_vars:
               eda_event_type: "{{ event.payload.event_type }}"
@@ -87,7 +85,7 @@
       action:
         run_job_template:
           name: "EDA-Match-Multiple-Action-B"
-          organization: "{{ vars.aap_organization }}"
+          organization: "Default"
           job_args:
             extra_vars:
               eda_event_type: "{{ event.payload.event_type }}"

@@ -50,8 +50,6 @@
         host: 0.0.0.0
         port: 5000
 
-  vars:
-    aap_organization: "Default"
 
   rules:
     # In parallel mode, this action does NOT block the next event.
@@ -61,7 +59,7 @@
       action:
         run_job_template:
           name: "EDA-Execution-Strategy-Action"
-          organization: "{{ vars.aap_organization }}"
+          organization: "Default"
           job_args:
             extra_vars:
               eda_event_id: "{{ event.payload.event_id | default('no-id') }}"

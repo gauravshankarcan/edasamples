@@ -169,7 +169,6 @@ eda_rulebook_activations:
     organization: Default
     enabled: true
     restart_policy: on-failure
-    execution_strategy: sequential
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-execution-sequential-activation
@@ -183,7 +182,6 @@ eda_rulebook_activations:
     organization: Default
     enabled: true
     restart_policy: on-failure
-    execution_strategy: parallel
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-execution-parallel-activation

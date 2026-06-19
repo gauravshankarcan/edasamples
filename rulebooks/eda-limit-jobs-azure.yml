@@ -46,8 +46,6 @@
         host: 0.0.0.0
         port: 5000
 
-  vars:
-    aap_organization: "Default"
     default_limit: "eda-test-hosts"
 
   rules:
@@ -59,7 +57,7 @@
       action:
         run_job_template:
           name: "EDA-Azure-Limit-OS-Patching"
-          organization: "{{ vars.aap_organization }}"
+          organization: "Default"
           job_args:
             limit: "{{ event.payload.target_hosts }}"
             extra_vars:
@@ -77,7 +75,7 @@
       action:
         run_job_template:
           name: "EDA-Azure-Limit-OS-Patching"
-          organization: "{{ vars.aap_organization }}"
+          organization: "Default"
           job_args:
             limit: "{{ event.payload.target_hosts }}"
             extra_vars:
@@ -95,7 +93,7 @@
       action:
         run_job_template:
           name: "EDA-Azure-Limit-OS-Patching"
-          organization: "{{ vars.aap_organization }}"
+          organization: "Default"
           job_args:
             limit: "{{ event.payload.target_hosts }}"
             extra_vars:
@@ -117,7 +115,7 @@
       action:
         run_job_template:
           name: "EDA-Azure-Limit-OS-Patching"
-          organization: "{{ vars.aap_organization }}"
+          organization: "Default"
           job_args:
             # Azure inventory keyed_groups with prefix="" and separator="" creates
             # group names equal to the tag value directly (e.g., "webservers").
@@ -137,7 +135,7 @@
       action:
         run_job_template:
           name: "EDA-Azure-Limit-OS-Patching"
-          organization: "{{ vars.aap_organization }}"
+          organization: "Default"
           job_args:
             limit: "{{ event.payload.target_hosts }}"
             extra_vars:
