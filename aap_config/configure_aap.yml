@@ -557,6 +557,8 @@
       - eda-execution-sequential-activation
       - eda-execution-parallel-activation
       - eda-vault-demo-activation
+      - eda-webhook-bearer-activation
+      - eda-webhook-hmac-activation
 
   pre_tasks:
     - name: "Load vault credentials"

@@ -1,0 +1,50 @@
+---
+# EDA Sample: HMAC-verified webhook → Run AAP Job Template
+#
+# The ansible.eda.webhook source verifies the request body against an HMAC
+# signature in the x-hub-signature-256 header (GitHub-style sha256=<hex>).
+#
+# Demo secret (change in production): eda-hmac-demo-secret
+#
+# Test:
+#   BODY='{"action":"deploy","target":"hmac-host","version":"1.0.0"}'
+#   SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac eda-hmac-demo-secret -hex | sed 's/^.* //')
+#   curl -kv -X POST <ACTIVATION-WEBHOOK-URL> \
+#     -H "Content-Type: application/json" \
+#     -H "x-hub-signature-256: sha256=${SIG}" \
+#     -d "$BODY"
+
+- name: "HMAC-verified webhook to job template"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+        hmac_secret: "eda-hmac-demo-secret"
+        hmac_algo: "sha256"
+        hmac_header: "x-hub-signature-256"
+        hmac_format: "hex"
+
+  rules:
+    - name: "Trigger playbook on HMAC-verified webhook event"
+      condition: event.payload is defined
+      action:
+        run_job_template:
+          name: "EDA-Sample-Webhook-Handler"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              eda_event_action: "{{ event.payload.action | default('unknown') }}"
+              eda_event_target: "{{ event.payload.target | default('all') }}"
+              eda_event_version: "{{ event.payload.version | default('') }}"
+              eda_event_raw: "{{ event.payload | string }}"
+              eda_source_host: "{{ event.meta.headers.get('host', 'unknown') }}"
+              eda_auth_mode: "hmac"
+
+    - name: "Debug — log HMAC-verified events"
+      condition: event.payload is defined
+      action:
+        debug:
+          msg: >-
+            [EDA-HMAC] action={{ event.payload.action | default('?') }}
+            target={{ event.payload.target | default('?') }}

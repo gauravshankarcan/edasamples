@@ -46,6 +46,8 @@ ansible-playbook setup_all_aap.yml
 | `23_vault_report.sh` | eda-vault-demo-activation | Vault report — secrets accessible |
 | `24_vault_verify.sh` | eda-vault-demo-activation | Vault verify — password complexity check |
 | `25_vault_rotate.sh` | eda-vault-demo-activation | Vault rotate — simulated rotation workflow |
+| `26_webhook_bearer_auth.sh` | eda-webhook-bearer-activation | Bearer token authenticated webhook |
+| `27_webhook_hmac.sh` | eda-webhook-hmac-activation | HMAC-SHA256 signed webhook payload |
 
 ## Outbound callback (test 11)
 

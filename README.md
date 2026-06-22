@@ -18,7 +18,9 @@ edasamples/
 │   ├── eda-match-single.yml           ← Single-match: exclusive conditions ★ NEW
 │   ├── eda-match-multiple.yml         ← Multi-match: overlapping conditions ★ NEW
 │   ├── eda-execution-sequential.yml   ← Sequential execution strategy ★ NEW
-│   └── eda-execution-parallel.yml     ← Parallel execution strategy ★ NEW
+│   ├── eda-execution-parallel.yml     ← Parallel execution strategy ★ NEW
+│   ├── eda-webhook-bearer.yml         ← Bearer-token authenticated webhook ★ NEW
+│   └── eda-webhook-hmac.yml           ← HMAC-verified webhook ★ NEW
 │
 ├── best_practice/                     ← START HERE if new to EDA
 │   ├── README.md                      ← Full guide: EDA vs playbook concepts
@@ -33,6 +35,7 @@ edasamples/
 ├── eda_execution_strategy/            ← execution_strategy examples ★ NEW
 ├── eda_requestor/                     ← Callback response back to requester
 ├── eda_regex_samples/                 ← Regex in EDA conditions
+├── eda_webhook_security/              ← Bearer + HMAC webhook auth ★ NEW
 │
 ├── decision-environment/              ← Build your own DE
 │   ├── CHANGELOG.md                   ← AAP 2.6 → 2.7 DE differences ★ NEW
@@ -83,6 +86,8 @@ ansible-playbook aap_config/configure_aap.yml \
 | Multi-match | `eda-match-multiple.yml` | `EDA-Match-Multiple-Action-A/B` | `eda-match-multiple-activation` |
 | Sequential strategy | `eda-execution-sequential.yml` | `EDA-Execution-Strategy-Action` | `eda-execution-sequential-activation` |
 | Parallel strategy | `eda-execution-parallel.yml` | `EDA-Execution-Strategy-Action` | `eda-execution-parallel-activation` |
+| Bearer webhook | `eda-webhook-bearer.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-bearer-activation` |
+| HMAC webhook | `eda-webhook-hmac.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-hmac-activation` |
 
 ---
 
