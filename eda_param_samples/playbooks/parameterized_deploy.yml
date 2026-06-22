@@ -27,10 +27,10 @@
           - "  Action:      {{ param_action }}"
           - "  Service:     {{ param_service }}"
           - "  Environment: {{ param_environment }}"
-          - "  Version:     {{ param_version }}"
+          - "  Version:     {{ param_version | default('') }}"
           - "  Requestor:   {{ param_requestor }}"
-          - "  Ticket:      {{ param_ticket_id }}"
-          - "  Replicas:    {{ param_replicas }}"
+          - "  Ticket:      {{ param_ticket_id | default('') }}"
+          - "  Replicas:    {{ param_replicas | default('(n/a)') }}"
           - "═══════════════════════════════════════"
 
     - name: "Validate action parameter"
@@ -94,7 +94,7 @@
             "action": "{{ param_action }}",
             "service": "{{ param_service }}",
             "environment": "{{ param_environment }}",
-            "version": "{{ param_version }}",
+            "version": "{{ param_version | default('') }}",
             "requestor": "{{ param_requestor }}",
             "ticket_id": "{{ param_ticket_id }}",
             "status": "completed"

@@ -8,30 +8,23 @@
   gather_facts: false
   connection: local
 
-  vars:
-    eda_event_type: "{{ eda_event_type | default('unknown') }}"
-    eda_event_id: "{{ eda_event_id | default('no-id') }}"
-    eda_severity: "{{ eda_severity | default('info') }}"
-    eda_triggered_rule: "{{ eda_triggered_rule | default('Action-B') }}"
-    eda_notification_channel: "{{ eda_notification_channel | default('slack') }}"
-
   tasks:
     - name: "Log Action B execution"
       ansible.builtin.debug:
         msg:
           - "════════ ACTION B FIRED ════════"
-          - "  Event type:    {{ eda_event_type }}"
-          - "  Event ID:      {{ eda_event_id }}"
-          - "  Severity:      {{ eda_severity }}"
-          - "  Triggered by:  {{ eda_triggered_rule }}"
-          - "  Notify via:    {{ eda_notification_channel }}"
+          - "  Event type:    {{ eda_event_type | default('unknown') }}"
+          - "  Event ID:      {{ eda_event_id | default('no-id') }}"
+          - "  Severity:      {{ eda_severity | default('info') }}"
+          - "  Triggered by:  {{ eda_triggered_rule | default('Action-B') }}"
+          - "  Notify via:    {{ eda_notification_channel | default('slack') }}"
           - "  *** This job only fires in match-multiple mode ***"
           - "═══════════════════════════════"
 
     - name: "Simulate Action B work (notification send)"
       ansible.builtin.debug:
-        msg: "Would send {{ eda_severity }} alert for {{ eda_event_type }} to {{ eda_notification_channel }}"
+        msg: "Would send {{ eda_severity | default('info') }} alert for {{ eda_event_type | default('unknown') }} to {{ eda_notification_channel | default('slack') }}"
 
     - name: "Summary"
       ansible.builtin.debug:
-        msg: "Action B (notification) complete for event {{ eda_event_id }}"
+        msg: "Action B (notification) complete for event {{ eda_event_id | default('no-id') }}"

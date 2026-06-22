@@ -43,6 +43,30 @@ ansible-playbook setup_all_aap.yml
 | `20_exec_sequential_event2.sh` | eda-execution-sequential-activation | Sequential: second event (waits for first) |
 | `21_exec_parallel_event1.sh` | eda-execution-parallel-activation | Parallel: first event (10s job) |
 | `22_exec_parallel_event2.sh` | eda-execution-parallel-activation | Parallel: second event (runs concurrently) |
+| `23_vault_report.sh` | eda-vault-demo-activation | Vault report — secrets accessible |
+| `24_vault_verify.sh` | eda-vault-demo-activation | Vault verify — password complexity check |
+| `25_vault_rotate.sh` | eda-vault-demo-activation | Vault rotate — simulated rotation workflow |
+
+## Outbound callback (test 11)
+
+Test `11_requestor_callback.sh` POSTs results to `https://eok4z67q40cbzt2.m.pipedream.net`.
+Verify the callback arrived in your Pipedream workflow event history after the
+EDA-Requestor-Handler job completes successfully.
+
+## AWS limit tests (06–10) prerequisites
+
+Tests 06–10 require AWS EC2 test instances and AAP configuration:
+
+- Create instances: `ansible-playbook eda_param_limit_jobs/aws/create_test_instances.yml`
+- Inventory: `EDA-AWS-Dynamic-Inventory` with `ansible_host` compose and `EDA-EC2-SSH-Credential`
+- SSH key: `/tmp/eda-test-key.pem` (created by the AWS setup playbook)
+
+## Azure limit tests (14–15) prerequisites
+
+Tests 14–15 require Azure VMs tagged `Owner=eda-samples`:
+
+- Create VMs: `ansible-playbook eda_param_limit_jobs/azure/create_test_vms.yml`
+- Inventory: `EDA-Azure-Inventory` synced with `EDA-Azure-Credential`
 
 ## Running Sequential vs Parallel Demo
 

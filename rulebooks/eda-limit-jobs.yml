@@ -77,11 +77,29 @@
           name: "EDA-Limit-OS-Patching"
           organization: "Default"
           job_args:
-            limit: "tag_{{ event.payload.aws_tag_key }}_{{ event.payload.aws_tag_value }}"
+            limit: >-
+              {%- if event.payload.aws_tag_key == 'Group' -%}
+              {{ event.payload.aws_tag_value }}
+              {%- elif event.payload.aws_tag_key == 'Environment' -%}
+              env_{{ event.payload.aws_tag_value }}
+              {%- elif event.payload.aws_tag_key == 'Role' -%}
+              role_{{ event.payload.aws_tag_value }}
+              {%- else -%}
+              tag_{{ event.payload.aws_tag_key }}_{{ event.payload.aws_tag_value }}
+              {%- endif -%}
             extra_vars:
               param_action: "{{ event.payload.action }}"
               param_requestor: "{{ event.payload.requestor | default('eda') }}"
-              eda_aws_filter: "tag_{{ event.payload.aws_tag_key }}_{{ event.payload.aws_tag_value }}"
+              eda_aws_filter: >-
+                {%- if event.payload.aws_tag_key == 'Group' -%}
+                {{ event.payload.aws_tag_value }}
+                {%- elif event.payload.aws_tag_key == 'Environment' -%}
+                env_{{ event.payload.aws_tag_value }}
+                {%- elif event.payload.aws_tag_key == 'Role' -%}
+                role_{{ event.payload.aws_tag_value }}
+                {%- else -%}
+                tag_{{ event.payload.aws_tag_key }}_{{ event.payload.aws_tag_value }}
+                {%- endif -%}
 
     - name: "Reject events without target specification"
       condition: >

@@ -40,8 +40,16 @@ keyed_groups:
     prefix: ""        # group name = tag value directly (e.g., "webservers")
     separator: ""
 
+  - key: tags.Group
+    prefix: tag_Group_
+    separator: ""     # group name = tag_Group_webservers (EDA aws_tag_key/value rule)
+
   - key: tags.Environment
     prefix: "env_"    # group name = env_staging, env_production, etc.
+    separator: ""
+
+  - key: tags.Environment
+    prefix: tag_Environment_
     separator: ""
 
   - key: tags.Role

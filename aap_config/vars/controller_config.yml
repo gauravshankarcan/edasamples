@@ -83,13 +83,24 @@ controller_inventory_sources:
         - key: tags.Group
           prefix: ""
           separator: ""
+        - key: tags.Group
+          prefix: tag_Group_
+          separator: ""
         - key: tags.Environment
           prefix: env_
+          separator: ""
+        - key: tags.Environment
+          prefix: tag_Environment_
+          separator: ""
         - key: tags.Role
           prefix: role_
+          separator: ""
       hostnames:
         - tag:Name
         - private-ip-address
+      compose:
+        ansible_host: "public_ip_address | default(private_ip_address)"
+        ansible_user: ec2-user
 
   - name: EDA-AzureRM-Source
     description: "Azure RM dynamic inventory source — discovers VMs tagged Owner=eda-samples"
@@ -159,6 +170,8 @@ controller_templates:
     playbook: "eda_param_limit_jobs/playbooks/limited_action.yml"
     ask_variables_on_launch: true
     ask_limit_on_launch: true
+    credentials:
+      - EDA-EC2-SSH-Credential
 
   - name: EDA-Requestor-Handler
     description: "Processes incoming request and POSTs result back to callback_url"
