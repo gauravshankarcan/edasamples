@@ -238,19 +238,3 @@ eda_rulebook_activations:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-webhook-mtls-activation
     log_level: debug
-
-  - name: eda-rule-name-vars-activation
-    description: "Experiment — Jinja variables in rule names via activation extra_var"
-    project: EDA-Samples
-    rulebook: eda-rule-name-vars.yml
-    decision_environment: EDA-Community-DE
-    organization: Default
-    enabled: true
-    restart_policy: on-failure
-    eda_credentials:
-      - EDA-AAP-Controller-Credential
-    k8s_service_name: eda-rule-name-vars-activation
-    log_level: debug
-    extra_var:
-      service_name: nginx
-      win_host: webserver01
