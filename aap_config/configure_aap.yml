@@ -559,6 +559,10 @@
       - eda-vault-demo-activation
       - eda-webhook-bearer-activation
       - eda-webhook-hmac-activation
+      - eda-webhook-mtls-activation
+
+    eda_activations_passthrough:
+      - eda-webhook-mtls-activation
 
   pre_tasks:
     - name: "Load vault credentials"
@@ -568,7 +572,7 @@
       tags: always
 
   tasks:
-    - name: "Create OCP Route for each activation"
+    - name: "Create OCP Route for each activation (edge TLS termination)"
       ansible.builtin.shell: |
         export KUBECONFIG="{{ kubeconfig_path }}"
         oc apply -f - -n {{ eda_namespace }} <<'YAML'
@@ -587,16 +591,43 @@
             termination: edge
             insecureEdgeTerminationPolicy: Redirect
         YAML
-      loop: "{{ eda_activations }}"
+      loop: "{{ eda_activations | difference(eda_activations_passthrough) }}"
       register: route_results
       changed_when: "'created' in route_results.stdout or 'configured' in route_results.stdout"
       tags:
         - routes
         - eda
 
+    - name: "Create OCP Route for mTLS activations (TLS passthrough)"
+      ansible.builtin.shell: |
+        export KUBECONFIG="{{ kubeconfig_path }}"
+        oc apply -f - -n {{ eda_namespace }} <<'YAML'
+        apiVersion: route.openshift.io/v1
+        kind: Route
+        metadata:
+          name: {{ item }}
+        spec:
+          host: {{ item }}.apps-crc.testing
+          to:
+            kind: Service
+            name: {{ item }}
+          port:
+            targetPort: 5000
+          tls:
+            termination: passthrough
+        YAML
+      loop: "{{ eda_activations_passthrough }}"
+      register: route_passthrough_results
+      changed_when: "'created' in route_passthrough_results.stdout or 'configured' in route_passthrough_results.stdout"
+      tags:
+        - routes
+        - eda
+
     - name: "Show route endpoints"
       ansible.builtin.debug:
-        msg: "Webhook URL: https://{{ item }}.apps-crc.testing"
+        msg: >-
+          Webhook URL: https://{{ item }}.apps-crc.testing
+          {% if item in eda_activations_passthrough %}(TLS passthrough — client cert required){% endif %}
       loop: "{{ eda_activations }}"
       tags:
         - routes

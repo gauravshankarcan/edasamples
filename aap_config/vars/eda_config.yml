@@ -225,3 +225,16 @@ eda_rulebook_activations:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-webhook-hmac-activation
     log_level: debug
+
+  - name: eda-webhook-mtls-activation
+    description: "mTLS-authenticated webhook → EDA-Sample-Webhook-Handler"
+    project: EDA-Samples
+    rulebook: eda-webhook-mtls.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: on-failure
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-webhook-mtls-activation
+    log_level: debug

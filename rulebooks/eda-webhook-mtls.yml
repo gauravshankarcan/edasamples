@@ -1,0 +1,51 @@
+---
+# EDA Sample: mTLS-authenticated webhook → Run AAP Job Template
+#
+# The ansible.eda.webhook source terminates TLS inside the activation pod and
+# requires clients to present a certificate signed by the demo CA.
+#
+# Certificates are baked into the EDA-Community-DE image at /etc/eda-webhooks-mtls/.
+# The OpenShift Route for this activation uses TLS passthrough so the client
+# handshake reaches the webhook listener directly.
+#
+# Test:
+#   curl -kv --cert eda_webhook_security/certs/client.crt \
+#     --key eda_webhook_security/certs/client.key \
+#     --cacert eda_webhook_security/certs/ca.crt \
+#     -X POST https://eda-webhook-mtls-activation.apps-crc.testing/ \
+#     -H "Content-Type: application/json" \
+#     -d '{"action":"deploy","target":"mtls-host","version":"1.0.0"}'
+
+- name: "mTLS-authenticated webhook to job template"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+        certfile: /etc/eda-webhooks-mtls/server.crt
+        keyfile: /etc/eda-webhooks-mtls/server.key
+        cafile: /etc/eda-webhooks-mtls/ca.crt
+
+  rules:
+    - name: "Trigger playbook on mTLS-authenticated webhook event"
+      condition: event.payload is defined
+      action:
+        run_job_template:
+          name: "EDA-Sample-Webhook-Handler"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              eda_event_action: "{{ event.payload.action | default('unknown') }}"
+              eda_event_target: "{{ event.payload.target | default('all') }}"
+              eda_event_version: "{{ event.payload.version | default('') }}"
+              eda_event_raw: "{{ event.payload | string }}"
+              eda_source_host: "{{ event.meta.headers.get('host', 'unknown') }}"
+              eda_auth_mode: "mtls"
+
+    - name: "Debug — log mTLS-authenticated events"
+      condition: event.payload is defined
+      action:
+        debug:
+          msg: >-
+            [EDA-mTLS] action={{ event.payload.action | default('?') }}
+            target={{ event.payload.target | default('?') }}

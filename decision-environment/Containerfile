@@ -36,6 +36,13 @@ RUN ansible-rulebook --version
 RUN ansible-doc -t module community.aws.ec2_instance --list 2>/dev/null | head -1 || \
     ansible-galaxy collection list community.aws
 
+# mTLS webhook demo certificates (lab use only)
+COPY mtls-certs/ca.crt mtls-certs/server.crt mtls-certs/server.key /etc/eda-webhooks-mtls/
+RUN chmod 755 /etc/eda-webhooks-mtls && \
+    chmod 644 /etc/eda-webhooks-mtls/*.crt && \
+    chmod 640 /etc/eda-webhooks-mtls/server.key && \
+    chown -R 1001:0 /etc/eda-webhooks-mtls
+
 # Switch back to non-root
 USER 1001
 

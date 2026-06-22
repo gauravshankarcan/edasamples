@@ -20,7 +20,8 @@ edasamples/
 │   ├── eda-execution-sequential.yml   ← Sequential execution strategy ★ NEW
 │   ├── eda-execution-parallel.yml     ← Parallel execution strategy ★ NEW
 │   ├── eda-webhook-bearer.yml         ← Bearer-token authenticated webhook ★ NEW
-│   └── eda-webhook-hmac.yml           ← HMAC-verified webhook ★ NEW
+│   ├── eda-webhook-hmac.yml           ← HMAC-verified webhook ★ NEW
+│   └── eda-webhook-mtls.yml           ← mTLS-authenticated webhook ★ NEW
 │
 ├── best_practice/                     ← START HERE if new to EDA
 │   ├── README.md                      ← Full guide: EDA vs playbook concepts
@@ -88,6 +89,7 @@ ansible-playbook aap_config/configure_aap.yml \
 | Parallel strategy | `eda-execution-parallel.yml` | `EDA-Execution-Strategy-Action` | `eda-execution-parallel-activation` |
 | Bearer webhook | `eda-webhook-bearer.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-bearer-activation` |
 | HMAC webhook | `eda-webhook-hmac.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-hmac-activation` |
+| mTLS webhook | `eda-webhook-mtls.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-mtls-activation` |
 
 ---
 
