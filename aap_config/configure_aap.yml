@@ -560,6 +560,7 @@
       - eda-webhook-bearer-activation
       - eda-webhook-hmac-activation
       - eda-webhook-mtls-activation
+      - eda-rule-name-vars-activation
 
     eda_activations_passthrough:
       - eda-webhook-mtls-activation

@@ -1,0 +1,43 @@
+---
+# EDA experiment: variables in rule names
+#
+# Tests whether activation Variables (extra_var) expand Jinja in rule names
+# at activation startup — similar to playbook task names.
+#
+# Activation extra_var supplies:
+#   service_name: nginx
+#   win_host: webserver01
+#
+# Test:
+#   bash testcases/29_rule_name_vars.sh
+
+- name: "Rule name variable expansion test"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: 'Restart service "{{ service_name }}" on host "{{ win_host }}"'
+      condition: event.payload is defined
+      action:
+        run_job_template:
+          name: "EDA-Sample-Webhook-Handler"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              eda_event_action: "{{ event.payload.action | default('rule_name_var_test') }}"
+              eda_event_target: "{{ win_host }}"
+              eda_event_version: "{{ service_name }}"
+              eda_event_raw: "{{ event.payload | string }}"
+              eda_auth_mode: "rule_name_var_test"
+
+    - name: "Debug — confirm activation variables are visible in actions"
+      condition: event.payload is defined
+      action:
+        debug:
+          msg: >-
+            [RuleNameVarTest] service={{ service_name }}
+            host={{ win_host }}
+            rule_name_expansion=activation_variables
