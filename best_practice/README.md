@@ -439,6 +439,33 @@ vars:
   environment: "{{ EDA_ENV | default('staging') }}"   # From activation extra-vars
 ```
 
+### Variables in rule names (playbook vs rulebook)
+
+In Ansible **playbooks**, Jinja in task names is valid and expands at runtime:
+
+```yaml
+- name: Restart service "{{ service_name }}" on host "{{ win_host }}"
+  ansible.builtin.debug:
+    msg: "done"
+```
+
+In **rulebooks**, rule names are expanded at **parse/startup** time via
+`substitute_variables()` — before events arrive. This means:
+
+| Variable source | Works in rule `name:`? | Works in `action.extra_vars`? |
+|----------------|------------------------|-------------------------------|
+| `ansible-rulebook --vars vars.yml` | Yes | Yes |
+| Activation Variables (`extra_var`) on AAP | **No** — fails with `'var' is undefined` at startup | Yes (evaluated per event) |
+| `event.payload.*` | No (event not available yet) | Yes |
+
+**Recommendation:** Keep rule names static. Put dynamic values in `debug.msg`,
+`condition` expressions (using `vars.` prefix), or `job_args.extra_vars`.
+
+Verified on ansible-rulebook 1.1.7 / AAP EDA: activation
+`eda-rule-name-vars-activation` failed at startup with
+`jinja2.exceptions.UndefinedError: 'service_name' is undefined` while the same
+variables work in `extra_vars` when the rulebook starts without Jinja in the name.
+
 ---
 
 ## 10. Testing Strategies
