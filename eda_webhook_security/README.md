@@ -46,7 +46,12 @@ The webhook plugin hashes the **raw request body** with the shared secret:
 
 ```bash
 BODY='{"action":"deploy","target":"hmac-host","version":"1.0.0"}'
-SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac eda-hmac-demo-secret -hex | sed 's/^.* //')
+SIG=$(python3 - <<'PY'
+import hmac, hashlib
+body = '{"action":"deploy","target":"hmac-host","version":"1.0.0"}'
+print(hmac.new(b"eda-hmac-demo-secret", body.encode(), hashlib.sha256).hexdigest())
+PY
+)
 # Send header: x-hub-signature-256: sha256=${SIG}
 ```
 

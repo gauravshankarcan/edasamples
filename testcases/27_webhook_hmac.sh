@@ -13,7 +13,13 @@
 #   • Job stdout: eda_auth_mode=hmac, eda_event_target=hmac-host
 #   • AAP → EDA → Activations: eda-webhook-hmac-activation status = running
 BODY='{"action":"deploy","target":"hmac-host","version":"1.0.0"}'
-SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac eda-hmac-demo-secret -hex | sed 's/^.* //')
+SIG=$(python3 - <<'PY'
+import hmac
+import hashlib
+body = '{"action":"deploy","target":"hmac-host","version":"1.0.0"}'
+print(hmac.new(b"eda-hmac-demo-secret", body.encode(), hashlib.sha256).hexdigest())
+PY
+)
 curl -kv -X POST https://eda-webhook-hmac-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -H "x-hub-signature-256: sha256=${SIG}" \
