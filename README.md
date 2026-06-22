@@ -12,16 +12,16 @@ edasamples/
 │   ├── samples-webhook.yml            ← Basic webhook → job template
 │   ├── eda-param-deploy.yml           ← Parameterized webhook extra vars
 │   ├── eda-limit-jobs.yml             ← Job limit with AWS inventory
-│   ├── eda-limit-jobs-azure.yml       ← Job limit with Azure inventory ★ NEW
+│   ├── eda-limit-jobs-azure.yml       ← Job limit with Azure inventory 
 │   ├── eda-requestor.yml              ← Response-back-to-requester pattern
 │   ├── eda-regex-demo.yml             ← CI/CD image tag router
-│   ├── eda-match-single.yml           ← Single-match: exclusive conditions ★ NEW
-│   ├── eda-match-multiple.yml         ← Multi-match: overlapping conditions ★ NEW
-│   ├── eda-execution-sequential.yml   ← Sequential execution strategy ★ NEW
-│   ├── eda-execution-parallel.yml     ← Parallel execution strategy ★ NEW
-│   ├── eda-webhook-bearer.yml         ← Bearer-token authenticated webhook ★ NEW
-│   ├── eda-webhook-hmac.yml           ← HMAC-verified webhook ★ NEW
-│   └── eda-webhook-mtls.yml           ← mTLS-authenticated webhook ★ NEW
+│   ├── eda-match-single.yml           ← Single-match: exclusive conditions 
+│   ├── eda-match-multiple.yml         ← Multi-match: overlapping conditions 
+│   ├── eda-execution-sequential.yml   ← Sequential execution strategy 
+│   ├── eda-execution-parallel.yml     ← Parallel execution strategy 
+│   ├── eda-webhook-bearer.yml         ← Bearer-token authenticated webhook 
+│   ├── eda-webhook-hmac.yml           ← HMAC-verified webhook 
+│   └── eda-webhook-mtls.yml           ← mTLS-authenticated webhook 
 │
 ├── best_practice/                     ← START HERE if new to EDA
 │   ├── README.md                      ← Full guide: EDA vs playbook concepts
@@ -31,28 +31,28 @@ edasamples/
 ├── eda_param_samples/                 ← Webhook with parameterized extra vars
 ├── eda_param_limit_jobs/              ← Webhook + job template limit
 │   ├── aws/                           ← AWS EC2 infra (create/inventory/teardown)
-│   └── azure/                         ← Azure VM infra (create/inventory/teardown) ★ NEW
-├── eda_match_multiple/                ← match_multiple_rules examples ★ NEW
-├── eda_execution_strategy/            ← execution_strategy examples ★ NEW
+│   └── azure/                         ← Azure VM infra (create/inventory/teardown) 
+├── eda_match_multiple/                ← match_multiple_rules examples 
+├── eda_execution_strategy/            ← execution_strategy examples 
 ├── eda_requestor/                     ← Callback response back to requester
 ├── eda_regex_samples/                 ← Regex in EDA conditions
-├── eda_webhook_security/              ← Bearer + HMAC webhook auth ★ NEW
+├── eda_webhook_security/              ← Bearer + HMAC webhook auth 
 │
 ├── decision-environment/              ← Build your own DE
-│   ├── CHANGELOG.md                   ← AAP 2.6 → 2.7 DE differences ★ NEW
+│   ├── CHANGELOG.md                   ← AAP 2.6 → 2.7 DE differences 
 │   └── ...
 │
 ├── aap_config/                        ← Full AAP config (Controller + EDA)
 │   ├── configure_aap.yml              ← Single playbook to configure everything
-│   ├── vars/auth.yml                  ← AWS + Azure credentials ★ UPDATED
-│   ├── vars/controller_config.yml     ← All inventories, job templates ★ UPDATED
-│   └── vars/eda_config.yml            ← All activations ★ UPDATED
+│   ├── vars/auth.yml                  ← AWS + Azure credentials 
+│   ├── vars/controller_config.yml     ← All inventories, job templates 
+│   └── vars/eda_config.yml            ← All activations 
 │
-├── testcases/                         ← Single curl per test ★ NEW
+├── testcases/                         ← Single curl per test 
 │   ├── README.md                      ← Test matrix
 │   └── 01_*.sh … 22_*.sh             ← 22 test scripts
 │
-└── devfile.yaml                       ← OpenShift Dev Spaces workspace ★ NEW
+└── devfile.yaml                       ← OpenShift Dev Spaces workspace 
 ```
 
 ---
