@@ -10,6 +10,6 @@
 #   • OpenShift route: eda-param-samples-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Jobs: EDA-Param-Deploy-Service with param_action=scale, replicas=5
 #   • Job stdout: "SCALING payment-api to 5 replicas" in production
-curl -k -X POST https://eda-param-samples-activation.apps-crc.testing \
+curl -kv -X POST https://eda-param-samples-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"scale","service":"payment-api","replicas":5,"environment":"production","requestor":"autoscaler"}'

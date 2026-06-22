@@ -187,6 +187,7 @@
           organization_id: 1
           is_enabled: true
           restart_policy: "on-failure"
+          log_level: debug
           eda_credentials:
             - "{{ eda_cred_id }}"
         status_code: [200, 201]

@@ -13,6 +13,6 @@
 #   • OpenShift route: eda-execution-parallel-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Jobs: EVT-PAR-001 and EVT-PAR-002 have overlapping run windows
 #   • Compare job timelines — second job starts within ~1s of the first
-curl -k -X POST https://eda-execution-parallel-activation.apps-crc.testing \
+curl -kv -X POST https://eda-execution-parallel-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"event_type":"alert","event_id":"EVT-PAR-002","sleep_seconds":5,"requestor":"monitoring"}'

@@ -12,6 +12,6 @@
 #   • OpenShift route: eda-limit-jobs-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Inventories → Groups: tag_Group_webservers (web01 + web02)
 #   • AAP → Jobs: EDA-Limit-OS-Patching, limit=tag_Group_webservers, successful
-curl -k -X POST https://eda-limit-jobs-activation.apps-crc.testing \
+curl -kv -X POST https://eda-limit-jobs-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"patching","aws_tag_key":"Group","aws_tag_value":"webservers","requestor":"ops-team","change_id":"CHG003"}'

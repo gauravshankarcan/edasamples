@@ -13,6 +13,6 @@
 #   • OpenShift route: eda-execution-sequential-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Jobs: EDA-Execution-Strategy-Action, event_id=EVT-SEQ-001, ~10s duration
 #   • AAP → EDA → Activations: eda-execution-sequential-activation strategy=sequential
-curl -k -X POST https://eda-execution-sequential-activation.apps-crc.testing \
+curl -kv -X POST https://eda-execution-sequential-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"event_type":"deploy","event_id":"EVT-SEQ-001","sleep_seconds":10,"requestor":"ops-team"}'

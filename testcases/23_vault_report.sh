@@ -16,6 +16,6 @@
 #   • AAP → Jobs: EDA-Vault-Demo, eda_event_action=report, status successful
 #   • Job stdout: secret lengths/prefixes shown (values never printed in clear text)
 #   • AAP → Credentials: EDA-Vault-Credential attached to EDA-Vault-Demo template
-curl -k -X POST https://eda-vault-demo-activation.apps-crc.testing \
+curl -kv -X POST https://eda-vault-demo-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"report","event_id":"EVT-VAULT-001","requestor":"ops-team"}'

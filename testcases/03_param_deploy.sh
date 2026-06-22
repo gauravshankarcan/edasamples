@@ -12,6 +12,6 @@
 #   • AAP → Jobs: EDA-Param-Deploy-Service (status successful)
 #   • Job stdout: param_action=deploy, service=payment-api, version=3.1.0, env=staging
 #   • Job stdout: audit JSON written to /tmp/eda_audit_payment-api_deploy_*.json
-curl -k -X POST https://eda-param-samples-activation.apps-crc.testing \
+curl -kv -X POST https://eda-param-samples-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"deploy","service":"payment-api","version":"3.1.0","environment":"staging","replicas":3,"requestor":"ci-pipeline"}'

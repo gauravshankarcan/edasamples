@@ -12,6 +12,6 @@
 #   • OpenShift route: eda-limit-jobs-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Inventories → EDA-AWS-Dynamic-Inventory → Groups: webservers (2 hosts)
 #   • AAP → Jobs: EDA-Limit-OS-Patching, limit=webservers, 2 hosts in job events
-curl -k -X POST https://eda-limit-jobs-activation.apps-crc.testing \
+curl -kv -X POST https://eda-limit-jobs-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"patching","target_hosts":"webservers","requestor":"ops-team","change_id":"CHG002"}'

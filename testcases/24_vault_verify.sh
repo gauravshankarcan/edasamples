@@ -12,6 +12,6 @@
 #   • OpenShift route: eda-vault-demo-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Jobs: EDA-Vault-Demo, eda_event_action=verify, status successful
 #   • Job stdout: "vault_db_password complexity check PASSED"
-curl -k -X POST https://eda-vault-demo-activation.apps-crc.testing \
+curl -kv -X POST https://eda-vault-demo-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"verify","event_id":"EVT-VAULT-002","requestor":"security-team"}'

@@ -11,6 +11,6 @@
 #   • OpenShift route: eda-limit-jobs-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Jobs: EDA-Limit-OS-Patching, limit=eda-test-web01,eda-test-web02
 #   • Job stdout: "RESTART nginx" debug message on both web hosts
-curl -k -X POST https://eda-limit-jobs-activation.apps-crc.testing \
+curl -kv -X POST https://eda-limit-jobs-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"restart_service","target_hosts":"eda-test-web01,eda-test-web02","service_name":"nginx","requestor":"ops-team"}'

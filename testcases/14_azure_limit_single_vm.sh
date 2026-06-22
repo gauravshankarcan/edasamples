@@ -15,6 +15,6 @@
 #   • OpenShift route: eda-azure-limit-jobs-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Inventories → EDA-Azure-Inventory: host eda-test-web01 present
 #   • AAP → Jobs: EDA-Azure-Limit-OS-Patching, limit=eda-test-web01, successful
-curl -k -X POST https://eda-azure-limit-jobs-activation.apps-crc.testing \
+curl -kv -X POST https://eda-azure-limit-jobs-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"patching","target_hosts":"eda-test-web01","requestor":"ops-team","change_id":"CHG-AZ-001"}'

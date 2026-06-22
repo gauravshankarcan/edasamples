@@ -1,6 +1,6 @@
 # Test Cases
 
-Each script contains a **single `curl` command** that triggers one EDA activation.
+Each script contains a **single verbose `curl` command** (`-v`) that triggers one EDA activation.
 Run any script directly after sourcing your environment:
 
 ```bash
@@ -10,7 +10,7 @@ bash testcases/01_webhook_basic.sh
 
 ## Prerequisites
 
-All activations must be running. Deploy everything with:
+All activations must be running with debug log level. Deploy everything with:
 
 ```bash
 source ~/.bashrc_eda_session

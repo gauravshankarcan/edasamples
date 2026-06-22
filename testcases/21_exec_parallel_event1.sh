@@ -13,6 +13,6 @@
 #   • OpenShift route: eda-execution-parallel-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Jobs: EDA-Execution-Strategy-Action, event_id=EVT-PAR-001, ~10s duration
 #   • AAP → EDA → Activations: eda-execution-parallel-activation strategy=parallel
-curl -k -X POST https://eda-execution-parallel-activation.apps-crc.testing \
+curl -kv -X POST https://eda-execution-parallel-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"event_type":"alert","event_id":"EVT-PAR-001","sleep_seconds":10,"requestor":"monitoring"}'

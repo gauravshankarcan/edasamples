@@ -279,6 +279,7 @@
           k8s_service_name: "sample-webhook"
           service_type: "NodePort"
           is_enabled: true
+          log_level: debug
         status_code: [200, 201, 400]
       register: _activation
       when: _eda_proj.json.results | length > 0

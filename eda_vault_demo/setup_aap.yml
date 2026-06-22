@@ -108,7 +108,7 @@
         eda_credentials:
           - EDA-AAP-Controller-Credential
         k8s_service_name: eda-vault-demo-activation
-        log_level: info
+        log_level: debug
         state: present
         controller_host: "{{ aap_hostname }}"
         controller_username: "{{ aap_username }}"

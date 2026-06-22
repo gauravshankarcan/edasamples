@@ -17,6 +17,6 @@
 #   • Job stdout: "Callback response code: 200" (or 201/202/204)
 #   • Pipedream: https://eok4z67q40cbzt2.m.pipedream.net — incoming POST with
 #     request_id=REQ-001, action=provision, status=success
-curl -k -X POST https://eda-requestor-activation.apps-crc.testing \
+curl -kv -X POST https://eda-requestor-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"request_id":"REQ-001","action":"provision","callback_url":"https://eok4z67q40cbzt2.m.pipedream.net","requestor":"portal","parameters":{"env":"dev","size":"small"}}'

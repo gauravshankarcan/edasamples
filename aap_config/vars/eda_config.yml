@@ -68,7 +68,7 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: sample-webhook-activation
-    log_level: error
+    log_level: debug
 
   - name: eda-param-samples-activation
     description: "Parameterized webhook → EDA-Param-Deploy-Service"
@@ -81,7 +81,7 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-param-samples-activation
-    log_level: error
+    log_level: debug
 
   - name: eda-limit-jobs-activation
     description: "Webhook with job limit → EDA-Limit-OS-Patching"
@@ -94,7 +94,7 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-limit-jobs-activation
-    log_level: error
+    log_level: debug
 
   - name: eda-requestor-activation
     description: "Requestor-response pattern → EDA-Requestor-Handler"
@@ -107,7 +107,7 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-requestor-activation
-    log_level: error
+    log_level: debug
 
   - name: eda-regex-demo-activation
     description: "CI/CD image tag regex router → EDA-Regex-Demo"
@@ -120,7 +120,7 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-regex-demo-activation
-    log_level: error
+    log_level: debug
 
   - name: eda-azure-limit-jobs-activation
     description: "Webhook with Azure VM limit → EDA-Azure-Limit-OS-Patching"
@@ -133,7 +133,7 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-azure-limit-jobs-activation
-    log_level: error
+    log_level: debug
 
   - name: eda-match-single-activation
     description: "Single-match demo — only first matching rule fires"
@@ -146,7 +146,7 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-match-single-activation
-    log_level: info
+    log_level: debug
 
   - name: eda-match-multiple-activation
     description: "Multiple-match demo — all matching rules fire for same event"
@@ -159,7 +159,7 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-match-multiple-activation
-    log_level: info
+    log_level: debug
 
   - name: eda-execution-sequential-activation
     description: "Sequential execution strategy — events processed one at a time"
@@ -172,7 +172,7 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-execution-sequential-activation
-    log_level: info
+    log_level: debug
 
   - name: eda-execution-parallel-activation
     description: "Parallel execution strategy — events processed concurrently"
@@ -185,7 +185,7 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-execution-parallel-activation
-    log_level: info
+    log_level: debug
 
   - name: eda-vault-demo-activation
     description: "Vault demo — EDA triggers playbook that accesses ansible-vaulted secrets"
@@ -198,4 +198,4 @@ eda_rulebook_activations:
     eda_credentials:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-vault-demo-activation
-    log_level: info
+    log_level: debug

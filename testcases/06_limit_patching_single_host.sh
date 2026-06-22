@@ -16,6 +16,6 @@
 #   • AAP → Inventories → EDA-AWS-Dynamic-Inventory: host eda-test-web01 present
 #   • AAP → Jobs: EDA-Limit-OS-Patching, limit=eda-test-web01, status successful
 #   • Job stdout: patching task runs on eda-test-web01 with OS facts gathered
-curl -k -X POST https://eda-limit-jobs-activation.apps-crc.testing \
+curl -kv -X POST https://eda-limit-jobs-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"patching","target_hosts":"eda-test-web01","requestor":"ops-team","change_id":"CHG001"}'

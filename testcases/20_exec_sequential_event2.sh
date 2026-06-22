@@ -13,6 +13,6 @@
 #   • OpenShift route: eda-execution-sequential-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Jobs: EVT-SEQ-002 start time is AFTER EVT-SEQ-001 finished time
 #   • Compare job timelines — second job queued ~10s behind the first
-curl -k -X POST https://eda-execution-sequential-activation.apps-crc.testing \
+curl -kv -X POST https://eda-execution-sequential-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"event_type":"deploy","event_id":"EVT-SEQ-002","sleep_seconds":5,"requestor":"ops-team"}'

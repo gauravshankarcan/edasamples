@@ -215,6 +215,7 @@
           rulebook_rulesets: "eda_requestor/rulebook.yml"
           organization_id: 1
           is_enabled: true
+          log_level: debug
         status_code: [200, 201, 400]
       register: _activation
       when:

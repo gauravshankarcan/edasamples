@@ -12,6 +12,6 @@
 #   • OpenShift route: eda-azure-limit-jobs-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Inventories → EDA-Azure-Inventory → Groups: webservers (2 VMs)
 #   • AAP → Jobs: EDA-Azure-Limit-OS-Patching, limit=webservers, 2 hosts targeted
-curl -k -X POST https://eda-azure-limit-jobs-activation.apps-crc.testing \
+curl -kv -X POST https://eda-azure-limit-jobs-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"patching","azure_tag_key":"Group","azure_tag_value":"webservers","requestor":"cloud-ops","change_id":"CHG-AZ-002"}'

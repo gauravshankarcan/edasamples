@@ -11,6 +11,6 @@
 #   • AAP → Automation Controller → Jobs: new EDA-Sample-Webhook-Handler job (successful)
 #   • Job stdout: shows eda_event_action=deploy, eda_event_target=webserver, version=1.0.0
 #   • AAP → EDA → Rulebook Activations: sample-webhook-activation status = running
-curl -k -X POST https://sample-webhook-activation.apps-crc.testing \
+curl -kv -X POST https://sample-webhook-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"action":"deploy","target":"webserver","version":"1.0.0"}'

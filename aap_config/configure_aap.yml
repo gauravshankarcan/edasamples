@@ -506,27 +506,27 @@
         - name: "eda-azure-limit-jobs-activation"
           rulebook: "eda-limit-jobs-azure.yml"
           description: "Webhook with Azure VM limit → EDA-Azure-Limit-OS-Patching"
-          log_level: error
+          log_level: debug
         - name: "eda-match-single-activation"
           rulebook: "eda-match-single.yml"
           description: "Single-match demo — mutually exclusive conditions"
-          log_level: info
+          log_level: debug
         - name: "eda-match-multiple-activation"
           rulebook: "eda-match-multiple.yml"
           description: "Multi-action demo — one event fires Action-A then Action-B"
-          log_level: info
+          log_level: debug
         - name: "eda-execution-sequential-activation"
           rulebook: "eda-execution-sequential.yml"
           description: "Sequential execution strategy — events processed one at a time"
-          log_level: info
+          log_level: debug
         - name: "eda-execution-parallel-activation"
           rulebook: "eda-execution-parallel.yml"
           description: "Parallel execution strategy — events processed concurrently"
-          log_level: info
+          log_level: debug
         - name: "eda-vault-demo-activation"
           rulebook: "eda-vault-demo.yml"
           description: "Vault demo — EDA triggers playbook that accesses ansible-vaulted secrets"
-          log_level: info
+          log_level: debug
       loop_control:
         label: "{{ item.name }}"
       tags:

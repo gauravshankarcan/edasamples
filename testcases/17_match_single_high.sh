@@ -9,6 +9,6 @@
 #   • OpenShift route: eda-match-single-activation.apps-crc.testing (HTTP 200)
 #   • AAP → Jobs: ONE EDA-Match-Multiple-Action-A job
 #   • Job extra vars: eda_triggered_rule=Handle-High-Severity, severity=high
-curl -k -X POST https://eda-match-single-activation.apps-crc.testing \
+curl -kv -X POST https://eda-match-single-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"event_type":"alert","severity":"high","event_id":"EVT-SINGLE-002","message":"cpu 90% sustained"}'

@@ -11,6 +11,6 @@
 #   • AAP → Jobs: EDA-Regex-Demo launched (different rule than test 12)
 #   • Job stdout: route_type=hotfix, target_environment=production
 #   • Job stdout: shows hotfix tag parsing from image field
-curl -k -X POST https://eda-regex-demo-activation.apps-crc.testing \
+curl -kv -X POST https://eda-regex-demo-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
   -d '{"image":"quay.io/myapp/api:hotfix-critical-login-bug","registry":"quay.io","pipeline":"hotfix","commit_sha":"def5678"}'
