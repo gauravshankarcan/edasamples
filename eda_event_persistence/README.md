@@ -97,6 +97,22 @@ POST /api/eda/v1/activations/
 
 ---
 
+## Prerequisites
+
+1. **Decision Environment** — `enable_persistence` requires `ansible-rulebook` with
+   `--persistence-id` support. Use `EDA-Persistence-DE`
+   (`de-supported-rhel9:latest`), not a stale custom DE image.
+
+2. **Rule Engine credential** — Create an **Event-Driven Ansible Rule Engine**
+   credential pointing at the EDA Postgres database. On OpenShift this is read from
+   the `sovereign-aap-eda-postgres-configuration` secret (done automatically by
+   `setup_aap.yml`). If none is selected in the UI, AAP uses the system credential
+   when available.
+
+3. **Webhook route** — Add the activation hostname to `/etc/hosts` on CRC and run
+   `ansible-playbook aap_config/configure_aap.yml --tags routes` if the webhook
+   returns 503.
+
 ## Setup
 
 ```bash

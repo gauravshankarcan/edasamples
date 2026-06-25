@@ -3,10 +3,19 @@
 #
 # Usage:
 #   source ~/.bashrc_eda_session
+#   export KUBECONFIG=~/.kube/config   # needed for Rule Engine credential
 #   ansible-playbook eda_event_persistence/setup_aap.yml
 #
 # Environment (from ~/.bashrc_eda_session):
 #   GITHUB_URL, GITHUB_TOKEN, AAP_BASE, AAP_TOKEN, AAP_PASS, KUBECONFIG
+#
+# Prerequisites:
+#   - EDA-Samples project synced in EDA Controller
+#   - EDA-Samples-Project synced in AAP Controller
+#   - OpenShift access to read sovereign-aap-eda-postgres-configuration secret
+#
+# After setup, add the webhook hostname to /etc/hosts (CRC) and run:
+#   bash testcases/30_event_persistence_restart_verify.sh
 
 - name: "EDA Event Persistence Demo Setup"
   hosts: localhost
@@ -19,11 +28,15 @@
     aap_pass: "{{ lookup('env', 'AAP_PASS') }}"
     aap_user: "admin"
     eda_api: "{{ aap_base }}/api/eda/v1"
+    ctrl_api: "{{ aap_base }}/api/controller/v2"
     git_repo_url: "{{ lookup('env', 'GITHUB_URL') | default('', true) }}"
-    github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('', true) }}"
-    kubeconfig_path: "{{ lookup('env', 'KUBECONFIG') | default('/tmp/kubeconfig-eda-session-canadalife', true) }}"
+    kubeconfig_path: "{{ lookup('env', 'KUBECONFIG') | default('/home/gshankar/.kube/config', true) }}"
     eda_namespace: aap
     activation_name: eda-event-persistence-activation
+    persistence_de_image: "registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:latest"
+    persistence_de_name: "EDA-Persistence-DE"
+    rule_engine_cred_name: "EDA-Rule-Engine-Credential"
+    postgres_secret: sovereign-aap-eda-postgres-configuration
 
   pre_tasks:
     - name: "Verify git_repo_url is set"
@@ -32,56 +45,77 @@
         fail_msg: "Set GITHUB_URL or pass -e git_repo_url=<url>"
 
   tasks:
-    - name: "Ensure EDA-Sample-Inventory exists"
-      awx.awx.inventory:
-        name: "EDA-Sample-Inventory"
-        organization: Default
-        state: present
-        controller_host: "{{ aap_base }}"
-        controller_oauthtoken: "{{ aap_token }}"
+    - name: "Get Controller project ID"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/projects/?name=EDA-Samples-Project"
+        headers:
+          Authorization: "Bearer {{ aap_token }}"
         validate_certs: false
+      register: _ctrl_proj
 
-    - name: "Add localhost to EDA-Sample-Inventory"
-      awx.awx.host:
-        name: localhost
-        inventory: EDA-Sample-Inventory
-        state: present
-        variables:
-          ansible_connection: local
-        controller_host: "{{ aap_base }}"
-        controller_oauthtoken: "{{ aap_token }}"
+    - name: "Get Controller inventory ID"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/inventories/?name=EDA-Sample-Inventory"
+        headers:
+          Authorization: "Bearer {{ aap_token }}"
         validate_certs: false
-      ignore_errors: true
+      register: _ctrl_inv
 
-    - name: "Ensure EDA-Samples-Project exists"
-      awx.awx.project:
-        name: "EDA-Samples-Project"
-        scm_type: git
-        scm_url: "{{ git_repo_url }}"
-        scm_branch: main
-        scm_update_on_launch: true
-        scm_credential: "{{ 'EDA-GitHub-Credential' if github_token | length > 0 else omit }}"
-        organization: Default
-        wait: true
-        state: present
-        controller_host: "{{ aap_base }}"
-        controller_oauthtoken: "{{ aap_token }}"
+    - name: "Assert Controller prerequisites exist"
+      ansible.builtin.assert:
+        that:
+          - _ctrl_proj.json.results | length > 0
+          - _ctrl_inv.json.results | length > 0
+        fail_msg: "Run aap_config/configure_aap.yml first to create Controller project/inventory"
+
+    - name: "Sync Controller project for new playbook"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/projects/{{ _ctrl_proj.json.results[0].id }}/update/"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ aap_token }}"
         validate_certs: false
+        status_code: [200, 201, 202]
+
+    - name: "Wait for Controller project sync"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/projects/{{ _ctrl_proj.json.results[0].id }}/playbooks/"
+        headers:
+          Authorization: "Bearer {{ aap_token }}"
+        validate_certs: false
+      register: _proj_playbooks
+      until: >-
+        'eda_event_persistence/playbooks/persistence_action.yml'
+        in (_proj_playbooks.json | default([]))
+      retries: 30
+      delay: 5
+
+    - name: "Check for existing job template"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/job_templates/?name=EDA-Event-Persistence-Action"
+        headers:
+          Authorization: "Bearer {{ aap_token }}"
+        validate_certs: false
+      register: _jt_check
 
     - name: "Create EDA-Event-Persistence-Action job template"
-      awx.awx.job_template:
-        name: "EDA-Event-Persistence-Action"
-        description: "Long-running action for event persistence demo (AAP 2.7+)"
-        job_type: run
-        inventory: EDA-Sample-Inventory
-        project: EDA-Samples-Project
-        playbook: "eda_event_persistence/playbooks/persistence_action.yml"
-        ask_variables_on_launch: true
-        organization: Default
-        state: present
-        controller_host: "{{ aap_base }}"
-        controller_oauthtoken: "{{ aap_token }}"
+      ansible.builtin.uri:
+        url: "{{ ctrl_api }}/job_templates/"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ aap_token }}"
         validate_certs: false
+        body_format: json
+        body:
+          name: "EDA-Event-Persistence-Action"
+          description: "Long-running action for event persistence demo (AAP 2.7+)"
+          job_type: run
+          inventory: "{{ _ctrl_inv.json.results[0].id }}"
+          project: "{{ _ctrl_proj.json.results[0].id }}"
+          playbook: "eda_event_persistence/playbooks/persistence_action.yml"
+          ask_variables_on_launch: true
+        status_code: [200, 201]
+      when: _jt_check.json.results | length == 0
 
     - name: "Get EDA project"
       ansible.builtin.uri:
@@ -103,27 +137,121 @@
         status_code: [200, 201, 202]
       when: _eda_proj.json.results | length > 0
 
-    - name: "Wait for EDA project sync"
+    - name: "Wait for EDA rulebook import"
       ansible.builtin.uri:
-        url: "{{ eda_api }}/projects/{{ _eda_proj.json.results[0].id }}/"
+        url: "{{ eda_api }}/rulebooks/?project_id={{ _eda_proj.json.results[0].id }}&name=eda-event-persistence.yml"
         user: "{{ aap_user }}"
         password: "{{ aap_pass }}"
         force_basic_auth: true
         validate_certs: false
-      register: _eda_proj_status
-      until: _eda_proj_status.json.import_state in ['completed', 'failed']
+      register: _eda_rulebook
+      until: _eda_rulebook.json.count | int > 0
       retries: 30
       delay: 5
       when: _eda_proj.json.results | length > 0
 
-    - name: "Get EDA-AAP-Controller-Credential ID"
+    - name: "Check for EDA-Persistence-DE"
       ansible.builtin.uri:
-        url: "{{ eda_api }}/eda-credentials/?name=EDA-AAP-Controller-Credential"
+        url: "{{ eda_api }}/decision-environments/?name={{ persistence_de_name }}"
         user: "{{ aap_user }}"
         password: "{{ aap_pass }}"
         force_basic_auth: true
         validate_certs: false
-      register: _eda_cred
+      register: _de_check
+
+    - name: "Create EDA-Persistence-DE (ansible-rulebook with --persistence-id support)"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/decision-environments/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "{{ persistence_de_name }}"
+          description: "AAP 2.7 supported DE — required for enable_persistence"
+          image_url: "{{ persistence_de_image }}"
+          organization_id: 1
+          pull_policy: always
+        status_code: [200, 201, 400]
+      when: _de_check.json.results | length == 0
+
+    - name: "Read EDA Postgres password from cluster secret"
+      ansible.builtin.command:
+        argv:
+          - oc
+          - get
+          - secret
+          - "{{ postgres_secret }}"
+          - -n
+          - "{{ eda_namespace }}"
+          - -o
+          - jsonpath={.data.password}
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: _pg_secret_b64
+      changed_when: false
+      failed_when: false
+
+    - name: "Set Postgres connection facts from cluster"
+      ansible.builtin.set_fact:
+        pg_host: sovereign-aap-postgres-15
+        pg_port: "5432"
+        pg_database: eda
+        pg_user: eda
+        pg_password: "{{ _pg_secret_b64.stdout | b64decode }}"
+        pg_sslmode: prefer
+      when: _pg_secret_b64.rc == 0 and _pg_secret_b64.stdout | length > 0
+      no_log: true
+
+    - name: "Check for existing Rule Engine credential"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/eda-credentials/?name={{ rule_engine_cred_name }}"
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _re_cred_check
+      when: pg_host is defined
+
+    - name: "Create EDA Rule Engine credential"
+      ansible.builtin.uri:
+        url: "{{ eda_api }}/eda-credentials/"
+        method: POST
+        user: "{{ aap_user }}"
+        password: "{{ aap_pass }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          name: "{{ rule_engine_cred_name }}"
+          description: "Postgres credential for Drools event persistence (AAP 2.7+)"
+          credential_type_id: 28
+          organization_id: 1
+          inputs:
+            postgres_db_host: "{{ pg_host }}"
+            postgres_db_port: "{{ pg_port }}"
+            postgres_db_name: "{{ pg_database }}"
+            postgres_db_user: "{{ pg_user }}"
+            postgres_db_password: "{{ pg_password }}"
+            postgres_sslmode: "{{ pg_sslmode }}"
+        status_code: [200, 201, 400]
+      register: _re_cred_create
+      when:
+        - pg_host is defined
+        - _re_cred_check.json.results | default([]) | length == 0
+      no_log: true
+
+    - name: "Set Rule Engine credential ID"
+      ansible.builtin.set_fact:
+        rule_engine_credential_id: >-
+          {{
+            _re_cred_check.json.results[0].id
+            if (_re_cred_check.json.results | default([]) | length > 0)
+            else _re_cred_create.json.id
+          }}
+      when: pg_host is defined
 
     - name: "Create or update event persistence activation"
       ansible.eda.rulebook_activation:
@@ -131,12 +259,13 @@
         description: "Event persistence demo — in-flight events survive restarts (AAP 2.7+)"
         project: "EDA-Samples"
         rulebook: "eda-event-persistence.yml"
-        decision_environment: "EDA-Community-DE"
+        decision_environment: "{{ persistence_de_name }}"
         organization: "Default"
         enabled: true
-        restart_policy: never
+        restart_policy: on-failure
         restart_on_project_update: true
         enable_persistence: true
+        rule_engine_credential_id: "{{ rule_engine_credential_id | default(omit) }}"
         eda_credentials:
           - EDA-AAP-Controller-Credential
         k8s_service_name: "{{ activation_name }}"
@@ -146,6 +275,7 @@
         controller_username: "{{ aap_user }}"
         controller_password: "{{ aap_pass }}"
         validate_certs: false
+      when: rule_engine_credential_id is defined
 
     - name: "Verify enable_persistence is set"
       ansible.builtin.uri:
@@ -155,6 +285,7 @@
         force_basic_auth: true
         validate_certs: false
       register: _activation_check
+      when: rule_engine_credential_id is defined
 
     - name: "Assert persistence is enabled on activation"
       ansible.builtin.assert:
@@ -162,37 +293,24 @@
           - _activation_check.json.results | length > 0
           - _activation_check.json.results[0].enable_persistence | bool
         fail_msg: "Activation {{ activation_name }} missing or enable_persistence is false"
+      when: rule_engine_credential_id is defined
 
-    - name: "Create OCP Route for persistence activation"
-      ansible.builtin.shell: |
-        export KUBECONFIG="{{ kubeconfig_path }}"
-        oc apply -f - -n {{ eda_namespace }} <<'YAML'
-        apiVersion: route.openshift.io/v1
-        kind: Route
-        metadata:
-          name: {{ activation_name }}
-        spec:
-          host: {{ activation_name }}.apps-crc.testing
-          to:
-            kind: Service
-            name: {{ activation_name }}
-          port:
-            targetPort: 5000
-          tls:
-            termination: edge
-            insecureEdgeTerminationPolicy: Redirect
-        YAML
-      register: _route
-      changed_when: "'created' in _route.stdout or 'configured' in _route.stdout"
-      failed_when: false
+    - name: "Ensure webhook hostname resolves locally (CRC)"
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: 'eda-event-persistence-activation\.apps-crc\.testing'
+        line: "127.0.0.1 eda-event-persistence-activation.apps-crc.testing"
+        state: present
+      become: true
 
     - name: "Setup complete"
       ansible.builtin.debug:
         msg:
-          - "Job template:  EDA-Event-Persistence-Action"
-          - "Activation:    {{ activation_name }}"
-          - "Persistence:   enable_persistence=true (uses System Rule Engine credential by default)"
-          - "Webhook URL:   https://{{ activation_name }}.apps-crc.testing"
-          - "Test:"
-          - "  bash testcases/29_event_persistence_send.sh"
-          - "  bash testcases/30_event_persistence_restart_verify.sh"
+          - "Job template:     EDA-Event-Persistence-Action"
+          - "Decision env:     {{ persistence_de_name }} (de-supported-rhel9 — required for persistence)"
+          - "Rule engine cred: {{ rule_engine_cred_name }} (id={{ rule_engine_credential_id | default('?') }})"
+          - "Activation:       {{ activation_name }}"
+          - "Persistence:      enable_persistence=true"
+          - "Webhook URL:      https://{{ activation_name }}.apps-crc.testing"
+          - "Next: run aap_config/configure_aap.yml --tags routes  (if webhook returns 503)"
+          - "Test: bash testcases/30_event_persistence_restart_verify.sh"

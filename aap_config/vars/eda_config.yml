@@ -12,6 +12,12 @@ eda_decision_environments:
     organization: Default
     pull_policy: always
 
+  - name: EDA-Persistence-DE
+    description: "AAP 2.7 supported DE — required for enable_persistence (--persistence-id)"
+    image_url: "registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:latest"
+    organization: Default
+    pull_policy: always
+
 # ── EDA Credentials ───────────────────────────────────────────────────────────
 eda_credentials:
   - name: EDA-GitHub-SCM-Credential
@@ -243,10 +249,10 @@ eda_rulebook_activations:
     description: "Event persistence demo — in-flight events survive restarts (AAP 2.7+)"
     project: EDA-Samples
     rulebook: eda-event-persistence.yml
-    decision_environment: EDA-Community-DE
+    decision_environment: EDA-Persistence-DE
     organization: Default
     enabled: true
-    restart_policy: never
+    restart_policy: on-failure
     restart_on_project_update: true
     enable_persistence: true
     eda_credentials:

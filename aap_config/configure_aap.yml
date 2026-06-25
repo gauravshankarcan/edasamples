@@ -538,10 +538,10 @@
         description: "Event persistence demo — in-flight events survive restarts (AAP 2.7+)"
         project: "EDA-Samples"
         rulebook: "eda-event-persistence.yml"
-        decision_environment: "EDA-Community-DE"
+        decision_environment: "EDA-Persistence-DE"
         organization: "Default"
         enabled: true
-        restart_policy: never
+        restart_policy: on-failure
         restart_on_project_update: true
         enable_persistence: true
         eda_credentials:
