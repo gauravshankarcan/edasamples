@@ -1,0 +1,54 @@
+---
+# Playbook: persistence_action.yml — long-running action for event persistence demo
+#
+# When enable_persistence is on, in-flight events survive activation restarts.
+# This playbook sleeps long enough to restart the activation mid-flight.
+
+- name: "Event Persistence Demo: Long-Running Action"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    eda_event_id: "{{ eda_event_id | default('no-id') }}"
+    eda_event_type: "{{ eda_event_type | default('unknown') }}"
+    eda_sleep_seconds: "{{ eda_sleep_seconds | default(30) | int }}"
+    eda_persistence_enabled: "{{ eda_persistence_enabled | default('true') }}"
+    eda_requestor: "{{ eda_requestor | default('eda') }}"
+
+  tasks:
+    - name: "Record start time"
+      ansible.builtin.set_fact:
+        start_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+    - name: "Log persistence action start"
+      ansible.builtin.debug:
+        msg:
+          - "════════════════════════════════════════════"
+          - "  EVENT PERSISTENCE ACTION STARTED"
+          - "  Event ID:              {{ eda_event_id }}"
+          - "  Event type:            {{ eda_event_type }}"
+          - "  Persistence enabled:   {{ eda_persistence_enabled }}"
+          - "  Sleep:                 {{ eda_sleep_seconds }}s"
+          - "  Started:               {{ start_time }}"
+          - "════════════════════════════════════════════"
+          - ""
+          - "  Restart the activation while this job runs to test persistence."
+
+    - name: "Simulate slow work (sleep {{ eda_sleep_seconds }}s)"
+      ansible.builtin.pause:
+        seconds: "{{ eda_sleep_seconds }}"
+
+    - name: "Record end time"
+      ansible.builtin.set_fact:
+        end_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+    - name: "Log persistence action complete"
+      ansible.builtin.debug:
+        msg:
+          - "════════════════════════════════════════════"
+          - "  EVENT PERSISTENCE ACTION COMPLETE"
+          - "  Event ID:    {{ eda_event_id }}"
+          - "  Started:     {{ start_time }}"
+          - "  Completed:   {{ end_time }}"
+          - "════════════════════════════════════════════"

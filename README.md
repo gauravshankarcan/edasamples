@@ -21,7 +21,8 @@ edasamples/
 │   ├── eda-execution-parallel.yml     ← Parallel execution strategy 
 │   ├── eda-webhook-bearer.yml         ← Bearer-token authenticated webhook 
 │   ├── eda-webhook-hmac.yml           ← HMAC-verified webhook 
-│   └── eda-webhook-mtls.yml           ← mTLS-authenticated webhook 
+│   ├── eda-webhook-mtls.yml           ← mTLS-authenticated webhook 
+│   └── eda-event-persistence.yml      ← Event persistence demo (AAP 2.7+) 
 │
 ├── best_practice/                     ← START HERE if new to EDA
 │   ├── README.md                      ← Full guide: EDA vs playbook concepts
@@ -37,6 +38,7 @@ edasamples/
 ├── eda_requestor/                     ← Callback response back to requester
 ├── eda_regex_samples/                 ← Regex in EDA conditions
 ├── eda_webhook_security/              ← Bearer + HMAC webhook auth 
+├── eda_event_persistence/             ← Event persistence (AAP 2.7+) 
 │
 ├── decision-environment/              ← Build your own DE
 │   ├── CHANGELOG.md                   ← AAP 2.6 → 2.7 DE differences 
@@ -90,6 +92,21 @@ ansible-playbook aap_config/configure_aap.yml \
 | Bearer webhook | `eda-webhook-bearer.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-bearer-activation` |
 | HMAC webhook | `eda-webhook-hmac.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-hmac-activation` |
 | mTLS webhook | `eda-webhook-mtls.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-mtls-activation` |
+| Event persistence | `eda-event-persistence.yml` | `EDA-Event-Persistence-Action` | `eda-event-persistence-activation` |
+
+---
+
+## Event Persistence (AAP 2.7+)
+
+See [`eda_event_persistence/README.md`](eda_event_persistence/README.md).
+
+When `enable_persistence` is on, in-flight events survive activation restarts.
+Pair with `restart_on_project_update` to avoid event gaps during project sync.
+
+```bash
+# Send event, restart mid-flight, verify job completes
+bash testcases/30_event_persistence_restart_verify.sh
+```
 
 ---
 

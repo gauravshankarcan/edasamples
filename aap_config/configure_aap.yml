@@ -532,7 +532,31 @@
       tags:
         - eda
 
-# ── Step 2: Create OCP Routes for EDA webhook services ───────────────────────
+    - name: "Create event persistence activation (AAP 2.7+)"
+      ansible.eda.rulebook_activation:
+        name: eda-event-persistence-activation
+        description: "Event persistence demo — in-flight events survive restarts (AAP 2.7+)"
+        project: "EDA-Samples"
+        rulebook: "eda-event-persistence.yml"
+        decision_environment: "EDA-Community-DE"
+        organization: "Default"
+        enabled: true
+        restart_policy: never
+        restart_on_project_update: true
+        enable_persistence: true
+        eda_credentials:
+          - EDA-AAP-Controller-Credential
+        k8s_service_name: eda-event-persistence-activation
+        log_level: debug
+        state: present
+        controller_host: "{{ aap_hostname }}"
+        controller_username: admin
+        controller_password: "{{ vault_aap_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      tags:
+        - eda
+
+# ── Step 2: Create OCP Routes for EDA activation webhooks ───────────────────────
 # The infra.aap_configuration collection configures EDA but does not know about
 # the OpenShift Route objects needed to expose each activation's ClusterIP service
 # externally.  This play creates/updates them idempotently.
@@ -560,6 +584,7 @@
       - eda-webhook-bearer-activation
       - eda-webhook-hmac-activation
       - eda-webhook-mtls-activation
+      - eda-event-persistence-activation
 
     eda_activations_passthrough:
       - eda-webhook-mtls-activation

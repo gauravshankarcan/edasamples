@@ -49,6 +49,8 @@ ansible-playbook setup_all_aap.yml
 | `26_webhook_bearer_auth.sh` | eda-webhook-bearer-activation | Bearer token authenticated webhook |
 | `27_webhook_hmac.sh` | eda-webhook-hmac-activation | HMAC-SHA256 signed webhook payload |
 | `28_webhook_mtls.sh` | eda-webhook-mtls-activation | mTLS client certificate authenticated webhook |
+| `29_event_persistence_send.sh` | eda-event-persistence-activation | Send long-running event (30s job) |
+| `30_event_persistence_restart_verify.sh` | eda-event-persistence-activation | Restart mid-flight; verify job completes |
 
 ## Outbound callback (test 11)
 

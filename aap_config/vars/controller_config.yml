@@ -232,6 +232,15 @@ controller_templates:
     playbook: "eda_execution_strategy/playbooks/slow_action.yml"
     ask_variables_on_launch: true
 
+  - name: EDA-Event-Persistence-Action
+    description: "Long-running action for event persistence demo (AAP 2.7+)"
+    job_type: run
+    organization: Default
+    inventory: EDA-Sample-Inventory
+    project: EDA-Samples-Project
+    playbook: "eda_event_persistence/playbooks/persistence_action.yml"
+    ask_variables_on_launch: true
+
   - name: EDA-Vault-Demo
     description: "Vault demo — playbook accesses vaulted secrets decrypted by EDA-Vault-Credential"
     job_type: run

@@ -238,3 +238,18 @@ eda_rulebook_activations:
       - EDA-AAP-Controller-Credential
     k8s_service_name: eda-webhook-mtls-activation
     log_level: debug
+
+  - name: eda-event-persistence-activation
+    description: "Event persistence demo — in-flight events survive restarts (AAP 2.7+)"
+    project: EDA-Samples
+    rulebook: eda-event-persistence.yml
+    decision_environment: EDA-Community-DE
+    organization: Default
+    enabled: true
+    restart_policy: never
+    restart_on_project_update: true
+    enable_persistence: true
+    eda_credentials:
+      - EDA-AAP-Controller-Credential
+    k8s_service_name: eda-event-persistence-activation
+    log_level: debug

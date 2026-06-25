@@ -1,0 +1,32 @@
+---
+# EDA Rulebook (AAP-activatable): Event persistence demo (AAP 2.7+)
+# Activation: eda-event-persistence-activation  (enable_persistence: true)
+#
+# Demonstrates in-flight event survival across activation restarts.
+# See eda_event_persistence/README.md for the full test procedure.
+#
+# Test:
+#   bash testcases/29_event_persistence_send.sh
+#   bash testcases/30_event_persistence_restart_verify.sh
+
+- name: "EDA Event Persistence Demo"
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: "Process event with persistence-backed job"
+      condition: event.payload.event_type is defined
+      action:
+        run_job_template:
+          name: "EDA-Event-Persistence-Action"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              eda_event_id: "{{ event.payload.event_id | default('no-id') }}"
+              eda_event_type: "{{ event.payload.event_type }}"
+              eda_sleep_seconds: "{{ event.payload.sleep_seconds | default(30) }}"
+              eda_persistence_enabled: "{{ event.payload.persistence_enabled | default('true') }}"
+              eda_requestor: "{{ event.payload.requestor | default('eda') }}"
