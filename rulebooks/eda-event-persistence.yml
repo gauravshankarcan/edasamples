@@ -27,15 +27,17 @@
       condition: event.payload.event_type == "threshold-reset"
       action:
         set_fact:
-          threshold_count: 0
-          last_batch_id: ""
+          fact:
+            threshold_count: 0
+            last_batch_id: ""
 
     - name: "Count threshold-hit events"
       condition: event.payload.event_type == "threshold-hit"
       action:
         set_fact:
-          threshold_count: "{{ (facts.threshold_count | default(0) | int) + 1 }}"
-          last_batch_id: "{{ event.payload.batch_id | default('') }}"
+          fact:
+            threshold_count: "{{ (fact.threshold_count | default(0) | int) + 1 }}"
+            last_batch_id: "{{ event.payload.batch_id | default('') }}"
 
     - name: "Trigger job at 3 hits (state threshold reached)"
       condition: facts.threshold_count is defined and facts.threshold_count >= 3
@@ -49,5 +51,6 @@
                 eda_threshold_count: "{{ facts.threshold_count }}"
                 eda_trigger_reason: "three threshold-hit events in window (state preserved across restarts)"
         - set_fact:
-            threshold_count: 0
-            last_batch_id: ""
+            fact:
+              threshold_count: 0
+              last_batch_id: ""
