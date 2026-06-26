@@ -4,6 +4,7 @@
 eda_persist_auth() {
   : "${AAP_USER:=admin}"
   : "${AAP_PASS:?Set AAP_PASS (source ~/.bashrc_eda_session)}"
+  export AAP_USER AAP_PASS
   AUTH=(-u "${AAP_USER}:${AAP_PASS}")
 }
 
@@ -37,6 +38,62 @@ eda_persist_wait_running() {
   done
 
   echo "FAILED: Activation ${activation_name} not running after ${2:-120}s (status=${status})" >&2
+  return 1
+}
+
+eda_persist_wait_listening() {
+  local activation_name="${1:?activation name}"
+  local deadline=$((SECONDS + ${2:-120}))
+
+  while (( SECONDS < deadline )); do
+    local act_id inst_id ready
+    act_id=$(curl -sk "${AUTH[@]}" "${EDA_API}/activations/?name=${activation_name}" \
+      | python3 -c "import json,sys; r=json.load(sys.stdin).get('results',[]); print(r[0]['id'] if r else '')")
+    if [[ -z "${act_id}" ]]; then
+      sleep 3
+      continue
+    fi
+    inst_id=$(curl -sk "${AUTH[@]}" \
+      "${EDA_API}/activation-instances/?activation_id=${act_id}&order_by=-id&page_size=1" \
+      | python3 -c "import json,sys; r=json.load(sys.stdin).get('results',[]); print(r[0]['id'] if r else '')")
+    if [[ -z "${inst_id}" ]]; then
+      sleep 3
+      continue
+    fi
+    ready=$(curl -sk "${AUTH[@]}" "${EDA_API}/activation-instances/${inst_id}/logs/?page_size=20" \
+      | python3 -c "
+import json, sys, urllib.request, base64, os
+inst_id = '${inst_id}'
+api = '${EDA_API}/activation-instances/' + inst_id + '/logs/'
+auth = base64.b64encode(f\"{os.environ.get('AAP_USER','admin')}:{os.environ['AAP_PASS']}\".encode()).decode()
+def fetch(url):
+    req = urllib.request.Request(url, headers={'Authorization': f'Basic {auth}'})
+    ctx = urllib.request.ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = 0
+    with urllib.request.urlopen(req, context=ctx) as resp:
+        return json.load(resp)
+data = fetch(api + '?page_size=20')
+count = data.get('count', 0)
+page_size = data.get('page_size', 20) or 20
+last_page = max(1, (count + page_size - 1) // page_size)
+data = fetch(f'{api}?page={last_page}&page_size={page_size}')
+text = '\n'.join(r.get('log', '') for r in data.get('results', []))
+markers = (
+    'Waiting for events',
+    'Waiting for actions on events',
+    'Recovered session',
+)
+print('ready' if any(m in text for m in markers) else '')
+")
+    if [[ "${ready}" == "ready" ]]; then
+      return 0
+    fi
+    echo "    waiting for webhook listener (instance=${inst_id})..." >&2
+    sleep 3
+  done
+
+  echo "FAILED: Activation ${activation_name} webhook not listening after ${2:-120}s" >&2
   return 1
 }
 
@@ -108,7 +165,7 @@ for job in data.get('results', []):
       sleep 5
       continue
     fi
-    echo "    waiting for job (batch=${batch_id})... (${SECONDS}s elapsed)"
+    echo "    waiting for job (batch=${batch_id})... (${SECONDS}s elapsed)" >&2
     sleep 5
   done
 

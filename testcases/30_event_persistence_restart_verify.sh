@@ -26,7 +26,6 @@ WEBHOOK_URL="https://${ACTIVATION_NAME}.apps-crc.testing"
 EDA_API="${AAP_BASE}/api/eda/v1"
 CTRL_API="${AAP_BASE}/api/controller/v2"
 BATCH_ID="PERSIST-RESTART-$(date +%s)"
-SENT_AT=$(date -u +%Y-%m-%dT%H:%M:%S)
 
 eda_persist_auth
 
@@ -61,14 +60,17 @@ curl -sk -X POST "${AUTH[@]}" \
 echo "    restarted activation id=${ACTIVATION_ID}"
 
 eda_persist_wait_running "${ACTIVATION_NAME}" 180
+eda_persist_wait_listening "${ACTIVATION_NAME}" 120
 
 echo "==> Step 4: Send hit 3 — should reach threshold if state was preserved"
+SENT_AT=$(date -u +%Y-%m-%dT%H:%M:%S)
 code=$(eda_persist_send_hit "${WEBHOOK_URL}" "${BATCH_ID}" 3)
 echo "    hit 3: HTTP ${code}"
 [[ "${code}" == "200" ]] || { echo "FAILED: hit 3 returned ${code}" >&2; exit 1; }
 
 echo "==> Step 5: Poll for threshold job (batch=${BATCH_ID})"
-read -r JOB_ID JOB_STATUS <<< "$(eda_persist_poll_job "${BATCH_ID}" "${SENT_AT}" 1 90)"
+JOB_MATCH=$(eda_persist_poll_job "${BATCH_ID}" "${SENT_AT}" 1 120) || exit 1
+read -r JOB_ID JOB_STATUS <<< "${JOB_MATCH}"
 echo "    SUCCESS: Job ${JOB_ID} status=${JOB_STATUS} — Drools count survived restart"
 
 echo "==> Event persistence state-preservation test passed"
