@@ -49,6 +49,8 @@ for n in 1 2; do
   [[ "${code}" == "200" ]] || { echo "FAILED: hit ${n} returned ${code}" >&2; exit 1; }
   sleep 1
 done
+echo "    waiting for Drools facts to persist before restart..."
+sleep 8
 
 echo "==> Step 3: Restart activation (simulates crash / project reload)"
 ACTIVATION_ID=$(curl -sk "${AUTH[@]}" \
