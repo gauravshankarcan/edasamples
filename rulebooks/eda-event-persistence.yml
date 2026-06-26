@@ -34,41 +34,41 @@
     - name: "First threshold hit (count 0 → 1)"
       condition:
         all:
-          - event.payload.event_type == "threshold-hit"
+          - events.hit << event.payload.event_type == "threshold-hit"
           - facts.threshold_count is not defined or facts.threshold_count == 0
       action:
         set_fact:
           fact:
             threshold_count: 1
-            last_batch_id: "{{ event.payload.batch_id | default('') }}"
+            last_batch_id: "{{ events.hit.payload.batch_id | default('') }}"
 
     - name: "Second threshold hit (count 1 → 2)"
       condition:
         all:
-          - event.payload.event_type == "threshold-hit"
+          - events.hit << event.payload.event_type == "threshold-hit"
           - facts.threshold_count == 1
       action:
         set_fact:
           fact:
             threshold_count: 2
-            last_batch_id: "{{ event.payload.batch_id | default('') }}"
+            last_batch_id: "{{ events.hit.payload.batch_id | default('') }}"
 
     - name: "Third threshold hit — trigger job (count 2 → 3)"
       condition:
         all:
-          - event.payload.event_type == "threshold-hit"
+          - events.hit << event.payload.event_type == "threshold-hit"
           - facts.threshold_count == 2
       actions:
         - set_fact:
             fact:
               threshold_count: 3
-              last_batch_id: "{{ event.payload.batch_id | default('') }}"
+              last_batch_id: "{{ events.hit.payload.batch_id | default('') }}"
         - run_job_template:
             name: "EDA-Event-Persistence-Action"
             organization: "Default"
             job_args:
               extra_vars:
-                eda_batch_id: "{{ event.payload.batch_id | default('') }}"
+                eda_batch_id: "{{ events.hit.payload.batch_id | default('') }}"
                 eda_threshold_count: "3"
                 eda_trigger_reason: "three threshold-hit events in window (state preserved across restarts)"
         - set_fact:
