@@ -25,40 +25,68 @@
   rules:
     - name: "Manual reset (clear Drools facts)"
       condition: event.payload.event_type == "threshold-reset"
-      action:
-        set_fact:
-          fact:
-            threshold_count: 0
-            last_batch_id: ""
+      actions:
+        - retract_fact:
+            fact:
+              threshold_count: 3
+            partial: true
+        - retract_fact:
+            fact:
+              threshold_count: 2
+            partial: true
+        - retract_fact:
+            fact:
+              threshold_count: 1
+            partial: true
+        - retract_fact:
+            fact:
+              threshold_count: 0
+            partial: true
+        - set_fact:
+            fact:
+              threshold_count: 0
+              last_batch_id: ""
 
     - name: "First threshold hit (count 0 → 1)"
       condition:
         all:
           - events.hit << event.payload.event_type == "threshold-hit"
-          - facts.threshold_count is not defined or facts.threshold_count == 0
-      action:
-        set_fact:
-          fact:
-            threshold_count: 1
-            last_batch_id: "{{ events.hit.payload.batch_id | default('') }}"
+          - facts.state << facts.threshold_count is not defined or facts.threshold_count == 0
+      actions:
+        - retract_fact:
+            fact:
+              threshold_count: 0
+            partial: true
+        - set_fact:
+            fact:
+              threshold_count: 1
+              last_batch_id: "{{ events.hit.payload.batch_id | default('') }}"
 
     - name: "Second threshold hit (count 1 → 2)"
       condition:
         all:
           - events.hit << event.payload.event_type == "threshold-hit"
-          - facts.threshold_count == 1
-      action:
-        set_fact:
-          fact:
-            threshold_count: 2
-            last_batch_id: "{{ events.hit.payload.batch_id | default('') }}"
+          - facts.state << facts.threshold_count == 1
+      actions:
+        - retract_fact:
+            fact:
+              threshold_count: 1
+            partial: true
+        - set_fact:
+            fact:
+              threshold_count: 2
+              last_batch_id: "{{ events.hit.payload.batch_id | default('') }}"
 
     - name: "Third threshold hit — trigger job (count 2 → 3)"
       condition:
         all:
           - events.hit << event.payload.event_type == "threshold-hit"
-          - facts.threshold_count == 2
+          - facts.state << facts.threshold_count == 2
       actions:
+        - retract_fact:
+            fact:
+              threshold_count: 2
+            partial: true
         - set_fact:
             fact:
               threshold_count: 3
@@ -71,6 +99,10 @@
                 eda_batch_id: "{{ events.hit.payload.batch_id | default('') }}"
                 eda_threshold_count: "3"
                 eda_trigger_reason: "three threshold-hit events in window (state preserved across restarts)"
+        - retract_fact:
+            fact:
+              threshold_count: 3
+            partial: true
         - set_fact:
             fact:
               threshold_count: 0
