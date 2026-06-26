@@ -567,7 +567,10 @@
   gather_facts: false
 
   vars:
-    kubeconfig_path: "{{ lookup('env', 'KUBECONFIG') | default('/tmp/kubeconfig-eda-session', true) }}"
+    # Activation pods/services run on the local CRC cluster (context crc-admin),
+    # not the remote shcservices cluster. Override with KUBECONFIG if needed.
+    kubeconfig_path: "{{ lookup('env', 'KUBECONFIG') | default(lookup('env', 'HOME') + '/.kube/config', true) }}"
+    openshift_context: "{{ lookup('env', 'OCP_CONTEXT') | default('crc-admin', true) }}"
     eda_namespace: "aap"
     eda_activations:
       - sample-webhook-activation
@@ -600,7 +603,7 @@
     - name: "Create OCP Route for each activation (edge TLS termination)"
       ansible.builtin.shell: |
         export KUBECONFIG="{{ kubeconfig_path }}"
-        oc apply -f - -n {{ eda_namespace }} <<'YAML'
+        oc --context="{{ openshift_context }}" apply -f - -n {{ eda_namespace }} <<'YAML'
         apiVersion: route.openshift.io/v1
         kind: Route
         metadata:
@@ -626,7 +629,7 @@
     - name: "Create OCP Route for mTLS activations (TLS passthrough)"
       ansible.builtin.shell: |
         export KUBECONFIG="{{ kubeconfig_path }}"
-        oc apply -f - -n {{ eda_namespace }} <<'YAML'
+        oc --context="{{ openshift_context }}" apply -f - -n {{ eda_namespace }} <<'YAML'
         apiVersion: route.openshift.io/v1
         kind: Route
         metadata:

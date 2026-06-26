@@ -1,87 +1,74 @@
 #!/usr/bin/env bash
-# Test 30 — Event persistence: restart activation mid-flight and verify job completes
+# Test 30 — Event persistence: Drools state survives activation restart
 #
-# Demonstrates AAP 2.7 enable_persistence:
-#   1. Send a 30s event
-#   2. Restart the activation while the job is running
-#   3. Poll Controller until EDA-Event-Persistence-Action succeeds for EVT-PERSIST-001
+# Scenario (3 events within 10 minutes, job on the 3rd):
+#   1. Reset counter
+#   2. Send threshold-hit #1 and #2  (facts.threshold_count → 2)
+#   3. Restart activation            (counter lost unless enable_persistence)
+#   4. Send threshold-hit #3         (count → 3 with persistence → job fires)
+#
+# With enable_persistence=true, facts survive restart and the job runs on hit #3.
+# Without persistence, hit #3 only sees count=1 and no job is launched.
 #
 # Prerequisites:
 #   source ~/.bashrc_eda_session
-#   ansible-playbook eda_event_persistence/setup_aap.yml
+#   enable_persistence=true on eda-event-persistence-activation (EDA 2.7+ server)
 set -euo pipefail
 
 : "${AAP_BASE:=https://aap-aap.apps-crc.testing}"
-: "${AAP_USER:=admin}"
-: "${AAP_PASS:?Set AAP_PASS (source ~/.bashrc_eda_session)}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/eda_persistence_common.sh
+source "${SCRIPT_DIR}/lib/eda_persistence_common.sh"
 
 ACTIVATION_NAME="eda-event-persistence-activation"
-EVENT_ID="EVT-PERSIST-001"
 WEBHOOK_URL="https://${ACTIVATION_NAME}.apps-crc.testing"
 EDA_API="${AAP_BASE}/api/eda/v1"
 CTRL_API="${AAP_BASE}/api/controller/v2"
-AUTH=(-u "${AAP_USER}:${AAP_PASS}")
+BATCH_ID="PERSIST-RESTART-$(date +%s)"
+SENT_AT=$(date -u +%Y-%m-%dT%H:%M:%S)
 
-echo "==> Step 1: Send long-running event (${EVENT_ID}, 30s sleep)"
-curl -sk -X POST "${WEBHOOK_URL}" \
-  -H "Content-Type: application/json" \
-  -d "{\"event_type\":\"persist-test\",\"event_id\":\"${EVENT_ID}\",\"sleep_seconds\":30,\"persistence_enabled\":\"true\"}" \
-  && echo
+eda_persist_auth
 
-echo "==> Step 2: Wait 3s (job running, event in-flight)"
-sleep 3
-
-echo "==> Step 3: Look up activation ID"
-ACTIVATION_ID=$(curl -sk "${AUTH[@]}" \
-  "${EDA_API}/activations/?name=${ACTIVATION_NAME}" \
-  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['results'][0]['id'])")
-echo "    Activation ID: ${ACTIVATION_ID}"
-
-echo "==> Step 4: Restart activation (simulate crash / project auto-restart)"
-curl -sk -X POST "${AUTH[@]}" \
-  "${EDA_API}/activations/${ACTIVATION_ID}/restart/" \
-  -H "Content-Type: application/json" \
-  -d '{}' && echo
-
-echo "==> Step 5: Wait for activation to return to running"
-for _ in $(seq 1 30); do
-  STATUS=$(curl -sk "${AUTH[@]}" \
-    "${EDA_API}/activations/${ACTIVATION_ID}/" \
-    | python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))")
-  echo "    status=${STATUS}"
-  [[ "${STATUS}" == "running" ]] && break
-  sleep 5
-done
-
-echo "==> Step 6: Poll Controller for successful job (up to 90s)"
-DEADLINE=$((SECONDS + 90))
-FOUND=0
-while (( SECONDS < DEADLINE )); do
-  JOBS=$(curl -sk "${AUTH[@]}" \
-    "${CTRL_API}/jobs/?job_template__name=EDA-Event-Persistence-Action&order_by=-finished&page_size=10")
-  MATCH=$(echo "${JOBS}" | python3 -c "
-import json, sys
-event_id = '${EVENT_ID}'
-data = json.load(sys.stdin)
-for job in data.get('results', []):
-    ev = job.get('extra_vars', '') or ''
-    if event_id in ev and job.get('status') == 'successful':
-        print(job['id'])
-        break
-")
-  if [[ -n "${MATCH}" ]]; then
-    echo "    SUCCESS: Job ${MATCH} completed for ${EVENT_ID}"
-    FOUND=1
-    break
-  fi
-  echo "    waiting... (${SECONDS}s elapsed)"
-  sleep 5
-done
-
-if [[ "${FOUND}" -ne 1 ]]; then
-  echo "FAILED: No successful EDA-Event-Persistence-Action job found for ${EVENT_ID}" >&2
-  echo "Check AAP → Jobs and EDA activation logs (enable_persistence should be true)." >&2
-  exit 1
+echo "==> Step 0: Check enable_persistence (required for this test)"
+PERSIST=$(eda_persist_activation_persistence_enabled "${ACTIVATION_NAME}")
+echo "    enable_persistence=${PERSIST}"
+if [[ "${PERSIST}" != "true" ]]; then
+  echo "SKIP: enable_persistence is false — restart will reset Drools facts." >&2
+  echo "      Enable persistence in the UI (and EDA 2.7+ server) then re-run." >&2
+  exit 2
 fi
 
-echo "==> Event persistence test passed"
+echo "==> Step 1: Wait for activation running (batch=${BATCH_ID})"
+eda_persist_wait_running "${ACTIVATION_NAME}" 120
+
+echo "==> Step 2: Reset counter and send hits 1 and 2"
+eda_persist_send_reset "${WEBHOOK_URL}" "${BATCH_ID}"
+for n in 1 2; do
+  code=$(eda_persist_send_hit "${WEBHOOK_URL}" "${BATCH_ID}" "${n}")
+  echo "    hit ${n}: HTTP ${code}"
+  [[ "${code}" == "200" ]] || { echo "FAILED: hit ${n} returned ${code}" >&2; exit 1; }
+  sleep 1
+done
+
+echo "==> Step 3: Restart activation (simulates crash / project reload)"
+ACTIVATION_ID=$(curl -sk "${AUTH[@]}" \
+  "${EDA_API}/activations/?name=${ACTIVATION_NAME}" \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['results'][0]['id'])")
+curl -sk -X POST "${AUTH[@]}" \
+  "${EDA_API}/activations/${ACTIVATION_ID}/restart/" \
+  -H "Content-Type: application/json" -d '{}' >/dev/null
+echo "    restarted activation id=${ACTIVATION_ID}"
+
+eda_persist_wait_running "${ACTIVATION_NAME}" 180
+
+echo "==> Step 4: Send hit 3 — should reach threshold if state was preserved"
+code=$(eda_persist_send_hit "${WEBHOOK_URL}" "${BATCH_ID}" 3)
+echo "    hit 3: HTTP ${code}"
+[[ "${code}" == "200" ]] || { echo "FAILED: hit 3 returned ${code}" >&2; exit 1; }
+
+echo "==> Step 5: Poll for threshold job (batch=${BATCH_ID})"
+read -r JOB_ID JOB_STATUS <<< "$(eda_persist_poll_job "${BATCH_ID}" "${SENT_AT}" 1 90)"
+echo "    SUCCESS: Job ${JOB_ID} status=${JOB_STATUS} — Drools count survived restart"
+
+echo "==> Event persistence state-preservation test passed"

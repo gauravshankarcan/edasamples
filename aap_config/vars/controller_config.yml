@@ -233,7 +233,7 @@ controller_templates:
     ask_variables_on_launch: true
 
   - name: EDA-Event-Persistence-Action
-    description: "Long-running action for event persistence demo (AAP 2.7+)"
+    description: "Threshold action when 3 hits in 10 minutes (Drools state demo)"
     job_type: run
     organization: Default
     inventory: EDA-Sample-Inventory

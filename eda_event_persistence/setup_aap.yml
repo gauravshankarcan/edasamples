@@ -30,7 +30,9 @@
     eda_api: "{{ aap_base }}/api/eda/v1"
     ctrl_api: "{{ aap_base }}/api/controller/v2"
     git_repo_url: "{{ lookup('env', 'GITHUB_URL') | default('', true) }}"
-    kubeconfig_path: "{{ lookup('env', 'KUBECONFIG') | default('/home/gshankar/.kube/config', true) }}"
+    kubeconfig_path: "{{ lookup('env', 'KUBECONFIG') | default(lookup('env', 'HOME') + '/.kube/config', true) }}"
+    openshift_context: "{{ lookup('env', 'OCP_CONTEXT') | default('crc-admin', true) }}"
+    crc_admin_helper: "{{ lookup('env', 'HOME') }}/.crc/bin/crc-admin-helper-linux-amd64"
     eda_namespace: aap
     activation_name: eda-event-persistence-activation
     persistence_de_image: "registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:latest"
@@ -236,6 +238,8 @@
             postgres_db_user: "{{ pg_user }}"
             postgres_db_password: "{{ pg_password }}"
             postgres_sslmode: "{{ pg_sslmode }}"
+            deduplication_window_size: "5"
+            primary_encryption_secret: "eda-persist-demo-key-2026"
         status_code: [200, 201, 400]
       register: _re_cred_create
       when:
@@ -295,6 +299,41 @@
         fail_msg: "Activation {{ activation_name }} missing or enable_persistence is false"
       when: rule_engine_credential_id is defined
 
+    - name: "Create OCP Route on CRC cluster for webhook"
+      ansible.builtin.shell: |
+        export KUBECONFIG="{{ kubeconfig_path }}"
+        oc --context="{{ openshift_context }}" apply -f - -n {{ eda_namespace }} <<'YAML'
+        apiVersion: route.openshift.io/v1
+        kind: Route
+        metadata:
+          name: {{ activation_name }}
+        spec:
+          host: {{ activation_name }}.apps-crc.testing
+          to:
+            kind: Service
+            name: {{ activation_name }}
+          port:
+            targetPort: 5000
+          tls:
+            termination: edge
+            insecureEdgeTerminationPolicy: Redirect
+        YAML
+      register: _route_result
+      changed_when: "'created' in _route_result.stdout or 'configured' in _route_result.stdout"
+      when: rule_engine_credential_id is defined
+
+    - name: "Register webhook hostname with CRC (apps-crc.testing)"
+      ansible.builtin.command:
+        argv:
+          - "{{ crc_admin_helper }}"
+          - add
+          - "127.0.0.1"
+          - "{{ activation_name }}.apps-crc.testing"
+      register: _crc_hosts
+      changed_when: "'added' in (_crc_hosts.stdout | default(''))"
+      failed_when: false
+      when: rule_engine_credential_id is defined
+
     - name: "Ensure webhook hostname resolves locally (CRC)"
       ansible.builtin.lineinfile:
         path: /etc/hosts
@@ -312,5 +351,7 @@
           - "Activation:       {{ activation_name }}"
           - "Persistence:      enable_persistence=true"
           - "Webhook URL:      https://{{ activation_name }}.apps-crc.testing"
-          - "Next: run aap_config/configure_aap.yml --tags routes  (if webhook returns 503)"
-          - "Test: bash testcases/30_event_persistence_restart_verify.sh"
+          - "CRC route:        oc --context={{ openshift_context }} get route {{ activation_name }} -n {{ eda_namespace }}"
+          - "Note: enable_persistence requires EDA 2.7+ server image on CRC (current 2.6 fails with websocket 1011)"
+          - "Test (webhook):   bash testcases/29_event_persistence_send.sh"
+          - "Test (persist):   bash testcases/30_event_persistence_restart_verify.sh  # after EDA 2.7 upgrade"

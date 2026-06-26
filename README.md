@@ -92,7 +92,7 @@ ansible-playbook aap_config/configure_aap.yml \
 | Bearer webhook | `eda-webhook-bearer.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-bearer-activation` |
 | HMAC webhook | `eda-webhook-hmac.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-hmac-activation` |
 | mTLS webhook | `eda-webhook-mtls.yml` | `EDA-Sample-Webhook-Handler` | `eda-webhook-mtls-activation` |
-| Event persistence | `eda-event-persistence.yml` | `EDA-Event-Persistence-Action` | `eda-event-persistence-activation` |
+| Event persistence | `eda-event-persistence.yml` | `EDA-Event-Persistence-Action` (3 hits in 10 min) | `eda-event-persistence-activation` |
 
 ---
 
@@ -100,12 +100,13 @@ ansible-playbook aap_config/configure_aap.yml \
 
 See [`eda_event_persistence/README.md`](eda_event_persistence/README.md).
 
-When `enable_persistence` is on, in-flight events survive activation restarts.
-Pair with `restart_on_project_update` to avoid event gaps during project sync.
+**State preservation:** the rulebook counts 3 `threshold-hit` events within 10 minutes
+using Drools facts (`facts.threshold_count`). With `enable_persistence`, that count
+survives activation restarts.
 
 ```bash
-# Send event, restart mid-flight, verify job completes
-bash testcases/30_event_persistence_restart_verify.sh
+bash testcases/29_event_persistence_send.sh           # 1 hit — no job yet
+bash testcases/30_event_persistence_restart_verify.sh # 2 hits + restart + 3rd
 ```
 
 ---

@@ -2,19 +2,29 @@
 
 ## What this sample demonstrates
 
-**Event persistence** is a new AAP 2.7 activation option that saves in-flight event
-state to the database so processing can resume without data loss after an activation
-restart. This is especially important when **Auto-restart on project update** is
-enabled, because it prevents event gaps while the activation reloads updated rulebooks.
+**State preservation** — `enable_persistence` saves the Drools rule engine’s
+internal facts to Postgres so they survive activation restarts.
+
+### Use case: 3 events within 10 minutes
+
+The rulebook counts `threshold-hit` webhook events in `facts.threshold_count`.
+A Controller job runs only when the counter reaches **3** inside a **10-minute**
+window (`facts.window_started_at`).
+
+| Without persistence | With persistence |
+|---------------------|------------------|
+| Restart clears `threshold_count` | Restart restores count from Postgres |
+| After 2 hits + restart, hit #3 starts at 1 | After 2 hits + restart, hit #3 reaches 3 → job fires |
+
+This is **not** about keeping a Controller job alive (Controller runs jobs
+independently). It is about **rule engine memory** — counts, windows, and other
+facts Drools uses to decide when to act.
 
 | Setting | Purpose |
 |---------|---------|
-| `enable_persistence` | Persist in-flight events across activation restarts |
-| `restart_on_project_update` | Auto-restart when the EDA project syncs new rulebook content |
-| `rule_engine_credential` | Optional Postgres credential for the Drools rule engine (defaults to the system credential) |
-
-Without persistence, events that arrive while a long-running action is in progress
-can be lost if the activation pod restarts mid-flight.
+| `enable_persistence` | Persist Drools facts across activation restarts |
+| `rule_engine_credential` | Postgres credential for the rule engine |
+| `restart_on_project_update` | Often paired with persistence during reloads |
 
 ---
 
@@ -22,163 +32,94 @@ can be lost if the activation pod restarts mid-flight.
 
 ```
 eda_event_persistence/
-├── README.md                     ← This file
-├── rulebook.yml                  ← Local reference copy
-├── setup_aap.yml                 ← Creates AAP Controller + EDA objects
+├── README.md
+├── setup_aap.yml
 └── playbooks/
-    └── persistence_action.yml    ← 30s sleep to allow restart mid-flight
+    └── persistence_action.yml    ← Runs when 3 hits threshold is met
 
 rulebooks/
-└── eda-event-persistence.yml     ← AAP-activatable version
+└── eda-event-persistence.yml     ← Counter + 10-minute window rules
 ```
 
 ---
 
-## How persistence works
+## How it works
 
 ```
-Time→   0s              5s (restart)        30s
-        │                │                   │
-Event   ├──[rule fires]──┤ activation dies     │
-        │   job starts   │ persistence saves   │
-        │                │ activation restarts │
-        │                ├──[resume event]────►│ job completes
+Hit 1 → facts.threshold_count = 1
+Hit 2 → facts.threshold_count = 2
+        [activation restart — facts lost unless persistence]
+Hit 3 → facts.threshold_count = 3 → run_job_template
 ```
 
-1. A webhook event triggers `run_job_template` (a 30-second playbook).
-2. While the job is running, restart the activation (or let project auto-restart fire).
-3. With `enable_persistence: true`, the Drools engine restores the in-flight event
-   and the job completes.
-4. Without persistence, the event is lost and no job finishes.
+Webhook payloads:
 
-Persistence uses the **Event-Driven Ansible Rule Engine** credential (Postgres).
-If you do not select one in the UI, AAP uses the **System Event-Driven Ansible Rule
-Engine Credential** automatically.
-
----
-
-## Configure in AAP
-
-### Via the UI (Automation Decisions → Rulebook Activations)
-
-1. Create or edit a rulebook activation.
-2. Under **Options**, check **Enable event persistence**.
-3. Optionally select an **Event-Driven Ansible Rule Engine** credential.
-4. Optionally check **Auto-restart on project update** (pairs well with persistence).
-
-### Via `ansible.eda.rulebook_activation`
-
-```yaml
-ansible.eda.rulebook_activation:
-  name: eda-event-persistence-activation
-  project: EDA-Samples
-  rulebook: eda-event-persistence.yml
-  decision_environment: EDA-Community-DE
-  enable_persistence: true
-  restart_on_project_update: true
-  restart_policy: never
-  eda_credentials:
-    - EDA-AAP-Controller-Credential
-  state: present
-```
-
-### Via the EDA API
-
-```json
-POST /api/eda/v1/activations/
-{
-  "name": "eda-event-persistence-activation",
-  "enable_persistence": true,
-  "restart_on_project_update": true,
-  "rulebook_rulesets": "rulebooks/eda-event-persistence.yml",
-  ...
-}
-```
+| event_type | Purpose |
+|------------|---------|
+| `threshold-reset` | Clear counter (start of each test) |
+| `threshold-hit` | Count one hit; include `ts` (unix seconds) and `batch_id` |
 
 ---
 
 ## Prerequisites
 
-1. **Decision Environment** — `enable_persistence` requires `ansible-rulebook` with
-   `--persistence-id` support. Use `EDA-Persistence-DE`
-   (`de-supported-rhel9:latest`), not a stale custom DE image.
-
-2. **Rule Engine credential** — Create an **Event-Driven Ansible Rule Engine**
-   credential pointing at the EDA Postgres database. On OpenShift this is read from
-   the `sovereign-aap-eda-postgres-configuration` secret (done automatically by
-   `setup_aap.yml`). If none is selected in the UI, AAP uses the system credential
-   when available.
-
-3. **Webhook route** — Add the activation hostname to `/etc/hosts` on CRC and run
-   `ansible-playbook aap_config/configure_aap.yml --tags routes` if the webhook
-   returns 503.
+1. **EDA-Persistence-DE** — for `--persistence-id` when persistence is enabled.
+2. **Rule Engine credential** — created by `setup_aap.yml` from cluster Postgres.
+3. **CRC route** — `oc --context=crc-admin get route eda-event-persistence-activation -n aap`
+4. **EDA 2.7+ server** — required for `enable_persistence: true` (2.6 → websocket 1011).
 
 ## Setup
 
 ```bash
 source ~/.bashrc_eda_session
+export KUBECONFIG=~/.kube/config
 ansible-playbook eda_event_persistence/setup_aap.yml
-```
-
-Or deploy everything via the main config:
-
-```bash
-ansible-playbook aap_config/configure_aap.yml -e @aap_config/vault.yml
 ```
 
 ---
 
-## Test — restart while event is in-flight
+## Tests
 
-### Step 1: Send a long-running event
+### Test 29 — smoke (no job until 3 hits)
 
 ```bash
 bash testcases/29_event_persistence_send.sh
 ```
 
-This POSTs an event with a 30-second job. The activation has `enable_persistence: true`.
+Resets counter, sends **1** hit, verifies HTTP 200 and **no** Controller job.
 
-### Step 2: Restart activation and verify job completes
+### Test 30 — state survives restart (requires `enable_persistence`)
 
 ```bash
 bash testcases/30_event_persistence_restart_verify.sh
 ```
 
-This script:
-1. Sends the long-running event
-2. Waits 3 seconds (job is running, event is in-flight)
-3. Restarts the activation via the EDA API
-4. Polls AAP Controller until `EDA-Event-Persistence-Action` succeeds for `EVT-PERSIST-001`
+1. Reset, send hits **1** and **2**
+2. Restart activation
+3. Send hit **3** → job must fire if persistence preserved the count
 
-### Manual test
+Exits with code **2** (skip) if `enable_persistence` is false.
+
+### Manual
 
 ```bash
-# Send event (30s job)
-curl -kv -X POST https://eda-event-persistence-activation.apps-crc.testing \
+BATCH="manual-$(date +%s)"
+TS=$(date +%s)
+curl -sk -X POST https://eda-event-persistence-activation.apps-crc.testing \
   -H "Content-Type: application/json" \
-  -d '{"event_type":"persist-test","event_id":"EVT-PERSIST-001","sleep_seconds":30}'
-
-# Wait a few seconds, then restart activation in AAP UI or:
-curl -sk -u admin:$AAP_PASS -X POST \
-  "$AAP_BASE/api/eda/v1/activations/<ID>/restart/"
-
-# Verify in AAP → Jobs: EDA-Event-Persistence-Action should reach Successful
+  -d "{\"event_type\":\"threshold-reset\",\"batch_id\":\"$BATCH\"}"
+for i in 1 2 3; do
+  curl -sk -X POST https://eda-event-persistence-activation.apps-crc.testing \
+    -H "Content-Type: application/json" \
+    -d "{\"event_type\":\"threshold-hit\",\"batch_id\":\"$BATCH\",\"hit_seq\":$i,\"ts\":$TS}"
+  sleep 1
+done
+# After 3rd hit: AAP → Jobs → EDA-Event-Persistence-Action
 ```
-
----
-
-## Related AAP 2.7 features
-
-| Feature | Relationship |
-|---------|-------------|
-| Auto-restart on project update | Restarts activations after project sync; persistence prevents event loss during restart |
-| Execution strategy | Orthogonal — controls concurrent event processing, not restart survival |
-| Log tracking ID | Helps trace activation lifecycle across restarts in logs |
 
 ---
 
 ## References
 
-- [AAP 2.7 — Rulebook activations (enable event persistence)](https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/html/administering_automation_decisions/eda-rulebook-activations)
-- [ansible.eda.rulebook_activation — enable_persistence](https://docs.ansible.com/projects/ansible-eda/rulebook_activation_module.html)
-- [ansible-rulebook in-flight event persistence PR #896](https://github.com/ansible/ansible-rulebook/pull/896)
+- [AAP 2.7 — enable event persistence](https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7/html/administering_automation_decisions/eda-rulebook-activations)
+- [best_practice/samples/02_stateful_facts.yml](../best_practice/samples/02_stateful_facts.yml) — `set_fact` counting pattern

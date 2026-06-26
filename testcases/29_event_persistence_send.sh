@@ -1,21 +1,49 @@
 #!/usr/bin/env bash
-# Test 29 — Event persistence: send long-running event (30s job)
+# Test 29 — Event persistence: single hit does NOT trigger job (counter = 1 of 3)
 #
-# What this curl does:
-#   POSTs a persist-test event to eda-event-persistence-activation.
-#   The activation has enable_persistence=true so in-flight events survive restarts.
+# State preservation demo (Drools facts):
+#   • Rule fires a Controller job only after 3 threshold-hit events within 10 minutes
+#   • One hit increments facts.threshold_count but must not launch a job yet
 #
-# Run with test 30 to restart mid-flight and verify the job still completes:
-#   bash testcases/29_event_persistence_send.sh & sleep 3; bash testcases/30_event_persistence_restart_verify.sh
+# Verifies:
+#   1. Activation status = running
+#   2. threshold-reset + 1× threshold-hit → HTTP 200
+#   3. No new EDA-Event-Persistence-Action job for this batch (count < 3)
 #
-# Resources to verify:
-#   • Route: eda-event-persistence-activation.apps-crc.testing
-#   • AAP → EDA → Activations: enable_persistence=true
-#   • AAP → Jobs: EDA-Event-Persistence-Action, event_id=EVT-PERSIST-001
+# Full persistence proof: testcases/30_event_persistence_restart_verify.sh
 set -euo pipefail
 
 : "${AAP_BASE:=https://aap-aap.apps-crc.testing}"
 
-curl -kv -X POST https://eda-event-persistence-activation.apps-crc.testing \
-  -H "Content-Type: application/json" \
-  -d '{"event_type":"persist-test","event_id":"EVT-PERSIST-001","sleep_seconds":30,"persistence_enabled":"true","requestor":"persistence-demo"}'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/eda_persistence_common.sh
+source "${SCRIPT_DIR}/lib/eda_persistence_common.sh"
+
+ACTIVATION_NAME="eda-event-persistence-activation"
+WEBHOOK_URL="https://${ACTIVATION_NAME}.apps-crc.testing"
+EDA_API="${AAP_BASE}/api/eda/v1"
+CTRL_API="${AAP_BASE}/api/controller/v2"
+BATCH_ID="PERSIST-SMOKE-$(date +%s)"
+SENT_AT=$(date -u +%Y-%m-%dT%H:%M:%S)
+
+eda_persist_auth
+
+echo "==> Step 1: Wait for activation running (batch=${BATCH_ID})"
+eda_persist_wait_running "${ACTIVATION_NAME}" 120
+
+echo "==> Step 2: Reset Drools counter and send 1 of 3 threshold hits"
+eda_persist_send_reset "${WEBHOOK_URL}" "${BATCH_ID}"
+HTTP_CODE=$(eda_persist_send_hit "${WEBHOOK_URL}" "${BATCH_ID}" 1)
+echo "    HTTP ${HTTP_CODE}"
+if [[ "${HTTP_CODE}" != "200" ]]; then
+  echo "FAILED: Webhook returned HTTP ${HTTP_CODE} (expected 200)" >&2
+  head -5 /tmp/eda-persist-webhook-body.txt >&2 || true
+  exit 1
+fi
+
+echo "==> Step 3: Confirm no threshold job yet (expect count=1 of 3, no Controller job)"
+if ! eda_persist_poll_job "${BATCH_ID}" "${SENT_AT}" 0 12; then
+  exit 1
+fi
+
+echo "==> Event persistence smoke test passed (1 hit accepted, no job — counter not at threshold)"
