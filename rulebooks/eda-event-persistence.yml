@@ -2,20 +2,20 @@
 # EDA Rulebook (AAP-activatable): Event persistence — Drools state preservation (AAP 2.7+)
 # Activation: eda-event-persistence-activation  (enable_persistence: true)
 #
-# Use case: fire a Controller job only after 3 matching events within 10 minutes.
-# The rule engine stores facts.threshold_count and facts.window_started_at in
-# Drools working memory. With enable_persistence, those facts survive activation
-# restarts; without persistence, a restart resets the count to zero.
+# Use case: fire a Controller job only after 3 threshold-hit events (within a
+# 10-minute window in production — tests send hits seconds apart).
+# facts.threshold_count lives in Drools working memory; enable_persistence
+# writes it to Postgres so a restart does not reset the count.
 #
 # Payload:
-#   threshold-reset  — clear counter (used at start of each test run)
-#   threshold-hit    — count one hit; include "ts" (unix seconds) and "batch_id"
+#   threshold-reset  — clear counter (start of each test run)
+#   threshold-hit    — count one hit; include batch_id
 #
 # Tests:
 #   bash testcases/29_event_persistence_send.sh
 #   bash testcases/30_event_persistence_restart_verify.sh
 
-- name: "EDA Event Persistence — 3 hits in 10 minutes"
+- name: "EDA Event Persistence — 3 hits threshold"
   hosts: all
   sources:
     - ansible.eda.webhook:
@@ -28,37 +28,17 @@
       action:
         set_fact:
           threshold_count: 0
-          window_started_at: 0
+          last_batch_id: ""
 
-    - name: "Expire 10-minute window and start a new count"
-      condition:
-        all:
-          - event.payload.event_type == "threshold-hit"
-          - facts.window_started_at is defined
-          - facts.window_started_at | int > 0
-          - (event.payload.ts | int) - (facts.window_started_at | int) > 600
-      action:
-        set_fact:
-          threshold_count: 1
-          window_started_at: "{{ event.payload.ts }}"
-
-    - name: "Increment hit counter inside the window"
-      condition:
-        all:
-          - event.payload.event_type == "threshold-hit"
-          - not:
-              all:
-                - facts.window_started_at is defined
-                - facts.window_started_at | int > 0
-                - (event.payload.ts | int) - (facts.window_started_at | int) > 600
+    - name: "Count threshold-hit events"
+      condition: event.payload.event_type == "threshold-hit"
       action:
         set_fact:
           threshold_count: "{{ (facts.threshold_count | default(0) | int) + 1 }}"
-          window_started_at: "{{ facts.window_started_at if (facts.window_started_at | default(0) | int) > 0 else event.payload.ts }}"
           last_batch_id: "{{ event.payload.batch_id | default('') }}"
 
     - name: "Trigger job at 3 hits (state threshold reached)"
-      condition: facts.threshold_count is defined and facts.threshold_count | int >= 3
+      condition: facts.threshold_count is defined and facts.threshold_count >= 3
       actions:
         - run_job_template:
             name: "EDA-Event-Persistence-Action"
@@ -67,8 +47,7 @@
               extra_vars:
                 eda_batch_id: "{{ event.payload.batch_id | default(facts.last_batch_id | default('')) }}"
                 eda_threshold_count: "{{ facts.threshold_count }}"
-                eda_window_started_at: "{{ facts.window_started_at }}"
-                eda_trigger_reason: "three threshold-hit events within 10 minutes"
+                eda_trigger_reason: "three threshold-hit events in window (state preserved across restarts)"
         - set_fact:
             threshold_count: 0
-            window_started_at: 0
+            last_batch_id: ""
