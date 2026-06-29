@@ -28,12 +28,12 @@ SENT_AT=$(date -u +%Y-%m-%dT%H:%M:%S)
 
 eda_persist_auth
 
-echo "==> Step 1: Wait for activation running (batch=${BATCH_ID})"
-eda_persist_wait_running "${ACTIVATION_NAME}" 120
+echo "==> Step 1: Wait for activation running and webhook ready (batch=${BATCH_ID})"
+eda_persist_ensure_ready "${ACTIVATION_NAME}" "${WEBHOOK_URL}" 240
 
 echo "==> Step 2: Reset Drools counter and send 1 of 3 threshold hits"
-eda_persist_send_reset "${WEBHOOK_URL}" "${BATCH_ID}"
-HTTP_CODE=$(eda_persist_send_hit "${WEBHOOK_URL}" "${BATCH_ID}" 1)
+eda_persist_send_reset "${WEBHOOK_URL}" "${BATCH_ID}" "${ACTIVATION_NAME}"
+HTTP_CODE=$(eda_persist_send_hit "${WEBHOOK_URL}" "${BATCH_ID}" 1 "${ACTIVATION_NAME}")
 echo "    HTTP ${HTTP_CODE}"
 if [[ "${HTTP_CODE}" != "200" ]]; then
   echo "FAILED: Webhook returned HTTP ${HTTP_CODE} (expected 200)" >&2

@@ -9,20 +9,14 @@
   gather_facts: false
   connection: local
 
-  vars:
-    eda_batch_id: "{{ eda_batch_id | default('no-batch') }}"
-    eda_threshold_count: "{{ eda_threshold_count | default('?') }}"
-    eda_window_started_at: "{{ eda_window_started_at | default('0') }}"
-    eda_trigger_reason: "{{ eda_trigger_reason | default('threshold met') }}"
-
   tasks:
     - name: "Log threshold action"
       ansible.builtin.debug:
         msg:
           - "════════════════════════════════════════════"
           - "  THRESHOLD ACTION — Drools state preserved"
-          - "  Batch ID:           {{ eda_batch_id }}"
-          - "  Hits in window:     {{ eda_threshold_count }}"
-          - "  Window started at:  {{ eda_window_started_at }} (unix)"
-          - "  Reason:             {{ eda_trigger_reason }}"
+          - "  Batch ID:           {{ eda_batch_id | default('no-batch') }}"
+          - "  Hits in window:     {{ eda_threshold_count | default('?') }}"
+          - "  Window started at:  {{ eda_window_started_at | default('0') }} (unix)"
+          - "  Reason:             {{ eda_trigger_reason | default('threshold met') }}"
           - "════════════════════════════════════════════"

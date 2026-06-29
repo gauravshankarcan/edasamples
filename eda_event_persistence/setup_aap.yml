@@ -38,7 +38,7 @@
     persistence_de_image: "registry.redhat.io/ansible-automation-platform-27/de-supported-rhel9:latest"
     persistence_de_name: "EDA-Persistence-DE"
     rule_engine_cred_name: "EDA-Rule-Engine-Credential"
-    postgres_secret: sovereign-aap-eda-postgres-configuration
+    postgres_secret: aap-eda-postgres-configuration
 
   pre_tasks:
     - name: "Verify git_repo_url is set"
@@ -198,7 +198,7 @@
 
     - name: "Set Postgres connection facts from cluster"
       ansible.builtin.set_fact:
-        pg_host: sovereign-aap-postgres-15
+        pg_host: aap-postgres-15.aap.svc.cluster.local
         pg_port: "5432"
         pg_database: eda
         pg_user: eda

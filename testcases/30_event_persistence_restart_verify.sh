@@ -38,19 +38,19 @@ if [[ "${PERSIST}" != "true" ]]; then
   exit 2
 fi
 
-echo "==> Step 1: Wait for activation running (batch=${BATCH_ID})"
-eda_persist_wait_running "${ACTIVATION_NAME}" 120
+echo "==> Step 1: Clear stale persistence state and wait for webhook ready (batch=${BATCH_ID})"
+eda_persist_prepare_clean_activation "${ACTIVATION_NAME}" "${WEBHOOK_URL}" 300
 
 echo "==> Step 2: Reset counter and send hits 1 and 2"
-eda_persist_send_reset "${WEBHOOK_URL}" "${BATCH_ID}"
+eda_persist_send_reset "${WEBHOOK_URL}" "${BATCH_ID}" "${ACTIVATION_NAME}" || exit 1
 for n in 1 2; do
-  code=$(eda_persist_send_hit "${WEBHOOK_URL}" "${BATCH_ID}" "${n}")
+  code=$(eda_persist_send_hit "${WEBHOOK_URL}" "${BATCH_ID}" "${n}" "${ACTIVATION_NAME}") || exit 1
   echo "    hit ${n}: HTTP ${code}"
   [[ "${code}" == "200" ]] || { echo "FAILED: hit ${n} returned ${code}" >&2; exit 1; }
   sleep 1
 done
 echo "    waiting for Drools facts to persist before restart..."
-sleep 8
+sleep 30
 
 echo "==> Step 3: Restart activation (simulates crash / project reload)"
 ACTIVATION_ID=$(curl -sk "${AUTH[@]}" \
@@ -62,7 +62,8 @@ curl -sk -X POST "${AUTH[@]}" \
 echo "    restarted activation id=${ACTIVATION_ID}"
 
 eda_persist_wait_running "${ACTIVATION_NAME}" 180
-eda_persist_wait_listening "${ACTIVATION_NAME}" 120
+echo "    waiting for persistence replay after restart..."
+eda_persist_wait_listening "${ACTIVATION_NAME}" 180
 
 echo "==> Step 4: Send hit 3 — should reach threshold if state was preserved"
 SENT_AT=$(date -u +%Y-%m-%dT%H:%M:%S)
